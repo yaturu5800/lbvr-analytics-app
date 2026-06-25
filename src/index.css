@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-5;
+  }
+  .badge-high {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-900 text-red-300;
+  }
+  .badge-medium {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-yellow-900 text-yellow-300;
+  }
+  .badge-low {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-900 text-blue-300;
+  }
+}
