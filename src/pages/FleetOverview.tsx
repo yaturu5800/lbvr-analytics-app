@@ -16,6 +16,7 @@ const COLORS = ['#6366f1', '#22d3ee', '#f59e0b', '#f43f5e', '#a3e635', '#fb923c'
 
 export default function FleetOverview() {
   const [sessions, setSessions] = useState<ExperienceSession[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [start, setStart] = useState(subDays(new Date(), 30))
   const [end, setEnd] = useState(new Date())
@@ -27,14 +28,16 @@ export default function FleetOverview() {
       setLoading(true)
       let q = supabase
         .from('experience_sessions')
-        .select('*')
+        .select('*', { count: 'exact' })
         .gte('started_at', start.getTime())
         .lte('started_at', end.getTime())
         .order('started_at', { ascending: false })
+        .limit(5000)
       if (premiseFilter) q = q.eq('premise_id', premiseFilter)
       if (expFilter) q = q.eq('experience_id', expFilter)
-      const { data } = await q
+      const { data, count } = await q
       setSessions(data ?? [])
+      setTotalCount(count ?? data?.length ?? 0)
       setLoading(false)
     }
     load()
@@ -46,6 +49,7 @@ export default function FleetOverview() {
   const avgDuration = completed.length
     ? Math.round(completed.reduce((a, s) => a + s.duration_seconds, 0) / completed.length)
     : 0
+  const isCapped = totalCount > sessions.length
 
   // Sessions per day
   const byDay: Record<string, number> = {}
@@ -90,11 +94,16 @@ export default function FleetOverview() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard label="Total Sessions" value={sessions.length} />
+            <MetricCard
+              label="Total Sessions"
+              value={totalCount.toLocaleString()}
+              sub={isCapped ? `Charts based on latest ${sessions.length.toLocaleString()} rows` : undefined}
+            />
             <MetricCard
               label="Completion Rate"
               value={pct(completed.length, sessions.length)}
               color="text-green-400"
+              sub={isCapped ? 'based on sample' : undefined}
             />
             <MetricCard
               label="Avg Duration (completed)"
