@@ -7,6 +7,8 @@ import DeviceList from './pages/DeviceList'
 import DeviceDetail from './pages/DeviceDetail'
 import ProblemDetection from './pages/ProblemDetection'
 import SpatialView from './pages/SpatialView'
+import SessionDurations from './pages/SessionDurations'
+import WrongLocation from './pages/WrongLocation'
 
 export default function App() {
   return (
@@ -16,9 +18,11 @@ export default function App() {
           <Route path="/" element={<FleetOverview />} />
           <Route path="/funnel" element={<FunnelAnalysis />} />
           <Route path="/completion" element={<CompletionRates />} />
+          <Route path="/durations" element={<SessionDurations />} />
           <Route path="/devices" element={<DeviceList />} />
           <Route path="/devices/:device_id" element={<DeviceDetail />} />
           <Route path="/problems" element={<ProblemDetection />} />
+          <Route path="/wrong-location" element={<WrongLocation />} />
           <Route path="/spatial" element={<SpatialView />} />
         </Routes>
       </Layout>

@@ -28,7 +28,7 @@ export default function ProblemDetection() {
       const [sessRes, evRes, healthRes] = await Promise.all([
         supabase
           .from('experience_sessions')
-          .select('session_id, device_id, duration_seconds, was_completed, was_skipped_to_main, started_at, premise_id')
+          .select('session_id, device_id, duration_seconds, was_completed, was_skipped_to_main, was_operator_reset, was_wrong_location, started_at, premise_id')
           .gte('started_at', cutoff),
         supabase
           .from('session_stage_events')
@@ -40,7 +40,7 @@ export default function ProblemDetection() {
           .gte('captured_at', cutoff),
       ])
 
-      const sessions: Pick<ExperienceSession, 'session_id' | 'device_id' | 'duration_seconds' | 'was_completed' | 'was_skipped_to_main' | 'started_at'>[] = sessRes.data ?? []
+      const sessions: Pick<ExperienceSession, 'session_id' | 'device_id' | 'duration_seconds' | 'was_completed' | 'was_skipped_to_main' | 'was_operator_reset' | 'was_wrong_location' | 'started_at'>[] = sessRes.data ?? []
       const events: SessionStageEvent[] = evRes.data ?? []
       const health: Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at' | 'battery_level' | 'device_state'>[] = healthRes.data ?? []
 
@@ -117,6 +117,36 @@ export default function ProblemDetection() {
             device_id: device,
             description: `${count} skip-to-main events in one day`,
             timestamp: Date.now(),
+          })
+        }
+      }
+
+      // Medium: wrong location start (player auto-advanced out of ExperienceStart too quickly)
+      for (const s of sessions) {
+        if (s.was_wrong_location === 1) {
+          found.push({
+            id: `wrong-location-${s.session_id}`,
+            severity: 'medium',
+            device_id: s.device_id,
+            description: `Wrong location start — player was not in position when experience began`,
+            timestamp: s.started_at,
+          })
+        }
+      }
+
+      // Low: real recalibration (calibration stage lasted > 5s)
+      for (const e of events) {
+        if (
+          (e.stage_from === 'Calibration' || e.stage_from === 'calibrating') &&
+          e.stage_duration_ms != null &&
+          e.stage_duration_ms > 5000
+        ) {
+          found.push({
+            id: `recalibration-${e.event_id}`,
+            severity: 'low',
+            device_id: e.device_id,
+            description: `Recalibration took ${(e.stage_duration_ms / 1000).toFixed(1)}s`,
+            timestamp: e.transitioned_at,
           })
         }
       }

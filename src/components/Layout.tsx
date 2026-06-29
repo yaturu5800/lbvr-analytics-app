@@ -4,8 +4,10 @@ const navItems = [
   { to: '/', label: 'Fleet Overview', icon: '📊' },
   { to: '/funnel', label: 'Funnel', icon: '🔽' },
   { to: '/completion', label: 'Completion', icon: '✅' },
+  { to: '/durations', label: 'Durations', icon: '⏱' },
   { to: '/devices', label: 'Devices', icon: '🥽' },
   { to: '/problems', label: 'Problems', icon: '⚠️' },
+  { to: '/wrong-location', label: 'Wrong Location', icon: '🎯' },
   { to: '/spatial', label: 'Spatial', icon: '📍' },
 ]
 

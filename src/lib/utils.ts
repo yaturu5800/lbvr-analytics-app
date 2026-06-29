@@ -30,10 +30,12 @@ export function getOutcomeLabel(session: {
   was_completed: boolean
   was_operator_ended: number
   was_skipped_to_main: number
+  was_operator_reset?: number
 }): string {
   if (session.was_completed && session.was_skipped_to_main === 0) return 'Natural'
   if (session.was_completed && session.was_skipped_to_main === 1) return 'Skip→Done'
   if (session.was_operator_ended === 1) return 'Operator Ended'
+  if (session.was_operator_reset === 1) return 'Operator Reset'
   return 'Failure'
 }
 
@@ -42,6 +44,7 @@ export function getOutcomeColor(label: string): string {
     case 'Natural': return 'text-green-400'
     case 'Skip→Done': return 'text-blue-400'
     case 'Operator Ended': return 'text-yellow-400'
+    case 'Operator Reset': return 'text-orange-400'
     default: return 'text-red-400'
   }
 }

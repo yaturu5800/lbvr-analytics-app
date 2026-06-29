@@ -15,6 +15,7 @@ const OUTCOME_COLORS: Record<string, string> = {
   Natural: '#22c55e',
   'Skip→Done': '#3b82f6',
   'Operator Ended': '#f59e0b',
+  'Operator Reset': '#f97316',
   Failure: '#ef4444',
 }
 
@@ -39,8 +40,10 @@ export default function CompletionRates() {
     load()
   }, [start, end])
 
-  const failed = sessions.filter((s) => !s.was_completed && s.was_operator_ended === 0)
   const completed = sessions.filter((s) => s.was_completed)
+  const operatorResets = sessions.filter((s) => !s.was_completed && s.was_operator_ended === 0 && s.was_operator_reset === 1)
+  const trueFailures = sessions.filter((s) => !s.was_completed && s.was_operator_ended === 0 && s.was_operator_reset === 0)
+  const incomplete = sessions.filter((s) => !s.was_completed)
 
   // By day
   const dayMap: Record<string, { total: number; completed: number }> = {}
@@ -92,11 +95,12 @@ export default function CompletionRates() {
         <p className="text-gray-500 text-sm">Loading…</p>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <MetricCard label="Total Sessions" value={sessions.length} />
             <MetricCard label="Completed" value={completed.length} color="text-green-400" />
             <MetricCard label="Completion Rate" value={pct(completed.length, sessions.length)} color="text-green-400" />
-            <MetricCard label="Failures" value={failed.length} color="text-red-400" sub="incomplete, not operator-ended" />
+            <MetricCard label="Operator Resets" value={operatorResets.length} color="text-orange-400" sub="mid-session reset" />
+            <MetricCard label="True Failures" value={trueFailures.length} color="text-red-400" sub="crash / disconnect" />
           </div>
 
           {sessions.length === 0 ? (
@@ -135,7 +139,7 @@ export default function CompletionRates() {
                     <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} />
                     <Tooltip contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {['Natural', 'Skip→Done', 'Operator Ended', 'Failure'].map((k) => (
+                    {['Natural', 'Skip→Done', 'Operator Ended', 'Operator Reset', 'Failure'].map((k) => (
                       <Bar key={k} dataKey={k} stackId="a" fill={OUTCOME_COLORS[k]} />
                     ))}
                   </BarChart>
@@ -144,7 +148,7 @@ export default function CompletionRates() {
             </div>
           )}
 
-          {failed.length > 0 && (
+          {incomplete.length > 0 && (
             <div className="card">
               <h2 className="text-sm font-semibold text-gray-400 mb-3">Incomplete Sessions</h2>
               <div className="overflow-x-auto">
@@ -159,8 +163,7 @@ export default function CompletionRates() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions
-                      .filter((s) => !s.was_completed)
+                    {incomplete
                       .slice(0, 100)
                       .map((s) => {
                         const label = getOutcomeLabel(s)

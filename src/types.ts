@@ -10,6 +10,9 @@ export interface ExperienceSession {
   was_completed: boolean
   was_operator_ended: number
   was_skipped_to_main: number
+  was_operator_reset: number
+  was_wrong_location: number
+  experience_start_duration_ms: number | null
   group_id: string | null
   created_at: string
 }
@@ -46,6 +49,7 @@ export interface SessionStageEvent {
   rotation_z: number | null
   rotation_w: number | null
   was_operator_triggered: number
+  stage_duration_ms: number | null
   created_at: string
 }
 
@@ -66,7 +70,7 @@ export interface FunnelSummary {
   reached_end: number
 }
 
-export type SessionOutcomeLabel = 'natural' | 'operator_ended' | 'failure' | 'skipped_then_completed'
+export type SessionOutcomeLabel = 'natural' | 'operator_ended' | 'operator_reset' | 'failure' | 'skipped_then_completed'
 
 export interface Database {
   public: {
@@ -78,6 +82,8 @@ export interface Database {
     Views: {
       session_outcomes: { Row: SessionOutcome }
       funnel_summary: { Row: FunnelSummary }
+      recalibration_events: { Row: SessionStageEvent }
+      wrong_location_starts: { Row: ExperienceSession }
     }
     Functions: Record<string, never>
     Enums: Record<string, never>
