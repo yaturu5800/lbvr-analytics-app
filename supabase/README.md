@@ -42,3 +42,4 @@ npx supabase db push --db-url "postgresql://postgres:<password>@<host>:5432/post
 | `20260629000001_session_tracking_gaps.sql` | Adds `was_operator_reset`, `experience_start_duration_ms`, `was_wrong_location` to `experience_sessions`; `stage_duration_ms` to `session_stage_events` |
 | `20260629000002_venue_map_config.sql` | Creates `venue_map_config` table for floor-plan map calibration; disables RLS; grants anon SELECT |
 | `20260629000003_analytics_views.sql` | Creates `recalibration_events` and `wrong_location_starts` views |
+| `20260629000004_venue_maps_storage.sql` | Creates `venue-maps` storage bucket (public) + public read policy for floor plan images |

@@ -40,3 +40,16 @@ CREATE OR REPLACE VIEW wrong_location_starts AS
   SELECT *
   FROM   experience_sessions
   WHERE  was_wrong_location = 1;
+
+-- 20260629000004: venue_maps_storage
+-- Creates the venue-maps bucket (public) and a read policy for the frontend.
+-- Uploads use the service role key which bypasses RLS — no INSERT policy needed.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('venue-maps', 'venue-maps', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "venue-maps public read" ON storage.objects;
+CREATE POLICY "venue-maps public read" ON storage.objects
+  FOR SELECT
+  TO public
+  USING (bucket_id = 'venue-maps');

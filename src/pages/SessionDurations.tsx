@@ -184,7 +184,7 @@ export default function SessionDurations() {
                     <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} />
                     <Tooltip
                       contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }}
-                      formatter={(value: number, name: string) => [value, name]}
+                      formatter={(value, name) => [value, name]}
                       labelFormatter={(label, payload) => {
                         const item = histogramData.find((d) => d.label === label)
                         return `${label} — ${item?.description ?? ''} (${item?._total ?? 0} total)`
