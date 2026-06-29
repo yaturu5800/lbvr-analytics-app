@@ -72,12 +72,25 @@ export interface FunnelSummary {
 
 export type SessionOutcomeLabel = 'natural' | 'operator_ended' | 'operator_reset' | 'failure' | 'skipped_then_completed'
 
+export interface VenueMapConfig {
+  premise_id: string
+  image_path: string | null
+  scale: number
+  offset_x: number
+  offset_y: number
+  rotation_deg: number
+  flip_x: boolean
+  flip_y: boolean
+  updated_at: number | null
+}
+
 export interface Database {
   public: {
     Tables: {
       experience_sessions: { Row: ExperienceSession; Insert: ExperienceSession; Update: Partial<ExperienceSession> }
       device_health_snapshots: { Row: DeviceHealthSnapshot; Insert: DeviceHealthSnapshot; Update: Partial<DeviceHealthSnapshot> }
       session_stage_events: { Row: SessionStageEvent; Insert: SessionStageEvent; Update: Partial<SessionStageEvent> }
+      venue_map_config: { Row: VenueMapConfig; Insert: VenueMapConfig; Update: Partial<VenueMapConfig> }
     }
     Views: {
       session_outcomes: { Row: SessionOutcome }
