@@ -8,6 +8,7 @@ const navItems = [
   { to: '/devices', label: 'Devices', icon: '🥽' },
   { to: '/problems', label: 'Problems', icon: '⚠️' },
   { to: '/wrong-location', label: 'Wrong Location', icon: '🎯' },
+  { to: '/recalibration', label: 'Recalibration', icon: '🔄' },
   { to: '/spatial', label: 'Spatial', icon: '📍' },
 ]
 

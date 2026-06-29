@@ -9,6 +9,7 @@ import ProblemDetection from './pages/ProblemDetection'
 import SpatialView from './pages/SpatialView'
 import SessionDurations from './pages/SessionDurations'
 import WrongLocation from './pages/WrongLocation'
+import Recalibration from './pages/Recalibration'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/devices/:device_id" element={<DeviceDetail />} />
           <Route path="/problems" element={<ProblemDetection />} />
           <Route path="/wrong-location" element={<WrongLocation />} />
+          <Route path="/recalibration" element={<Recalibration />} />
           <Route path="/spatial" element={<SpatialView />} />
         </Routes>
       </Layout>
