@@ -223,7 +223,7 @@ export default function SpatialView() {
       let q = supabase.from('venue_map_config').select('*')
       if (premiseFilter) q = q.eq('premise_id', premiseFilter)
       const { data } = await q.limit(1)
-      const cfg = data?.[0] ?? null
+      const cfg = (data as VenueMapConfig[] | null)?.[0] ?? null
       setMapConfig(cfg)
       setCalibCfg(cfg ? { ...cfg } : null)
       setMapConfigLoaded(true)
@@ -245,16 +245,17 @@ export default function SpatialView() {
   const saveCalibration = async () => {
     if (!calibCfg) return
     setCalibSaving(true)
-    const { error } = await supabase
-      .from('venue_map_config')
-      .update({
-        scale: calibCfg.scale,
-        offset_x: calibCfg.offset_x,
-        offset_y: calibCfg.offset_y,
-        rotation_deg: calibCfg.rotation_deg,
-        flip_x: calibCfg.flip_x,
-        flip_y: calibCfg.flip_y,
-      })
+    const updatePayload: Partial<VenueMapConfig> = {
+      scale: calibCfg.scale,
+      offset_x: calibCfg.offset_x,
+      offset_y: calibCfg.offset_y,
+      rotation_deg: calibCfg.rotation_deg,
+      flip_x: calibCfg.flip_x,
+      flip_y: calibCfg.flip_y,
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from('venue_map_config') as any)
+      .update(updatePayload)
       .eq('premise_id', calibCfg.premise_id)
     setCalibSaving(false)
     if (!error) {
