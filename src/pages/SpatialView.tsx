@@ -207,6 +207,9 @@ export default function SpatialView() {
   const [minDuration, setMinDuration] = useState('')
   const [maxDuration, setMaxDuration] = useState('')
 
+  // device text search (client-side, partial match)
+  const [deviceSearch, setDeviceSearch] = useState('')
+
   // map controls
   const [wrongLocationOnly, setWrongLocationOnly] = useState(false)
   const [showHeadings, setShowHeadings] = useState(true)
@@ -350,11 +353,18 @@ export default function SpatialView() {
   const minDurSec = minDuration !== '' ? Number(minDuration) : null
   const maxDurSec = maxDuration !== '' ? Number(maxDuration) : null
 
+  const deviceSearchLower = deviceSearch.trim().toLowerCase()
+
   const durationFiltered = points.filter((p) => {
     if (minDurSec !== null && (p.duration_seconds == null || p.duration_seconds < minDurSec)) return false
     if (maxDurSec !== null && (p.duration_seconds == null || p.duration_seconds > maxDurSec)) return false
+    if (deviceSearchLower && !p.device_id.toLowerCase().includes(deviceSearchLower)) return false
     return true
   })
+
+  const matchedDevices = deviceSearchLower
+    ? [...new Set(durationFiltered.map((p) => p.device_id))]
+    : []
 
   const visiblePoints = wrongLocationOnly ? durationFiltered.filter((p) => p.wrongLocation) : durationFiltered
   const wrongCount = durationFiltered.filter((p) => p.wrongLocation).length
@@ -417,6 +427,29 @@ export default function SpatialView() {
         <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e) }} />
         <FilterSelect options={premises} value={premiseFilter} onChange={setPremiseFilter} placeholder="All Premises" />
         <FilterSelect options={devices} value={deviceFilter} onChange={setDeviceFilter} placeholder="All Devices" />
+        <div className="relative flex items-center">
+          <input
+            type="text"
+            placeholder="Search device…"
+            value={deviceSearch}
+            onChange={(e) => setDeviceSearch(e.target.value)}
+            className="w-36 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+          />
+          {deviceSearch && (
+            <button
+              onClick={() => setDeviceSearch('')}
+              className="absolute right-1.5 text-gray-500 hover:text-gray-300 text-xs"
+            >✕</button>
+          )}
+          {deviceSearch && matchedDevices.length > 0 && (
+            <span className="ml-1.5 text-xs text-indigo-400 whitespace-nowrap">
+              {matchedDevices.length} device{matchedDevices.length !== 1 ? 's' : ''} · {durationFiltered.length} pts
+            </span>
+          )}
+          {deviceSearch && matchedDevices.length === 0 && (
+            <span className="ml-1.5 text-xs text-red-400 whitespace-nowrap">no match</span>
+          )}
+        </div>
         <div className="flex items-center gap-1 text-xs text-gray-400" title="Filter by session duration to exclude outliers (e.g. set max to remove crash/reset noise, or min to remove instant failures)">
           <span>Duration (s):</span>
           <input
@@ -652,8 +685,8 @@ export default function SpatialView() {
                         height: DOT,
                         borderRadius: '50%',
                         backgroundColor: color,
-                        border: '2px solid rgba(255,255,255,0.8)',
-                        boxShadow: `0 0 5px ${color}88`,
+                        border: deviceSearchLower ? '2px solid rgba(255,255,255,1)' : '2px solid rgba(255,255,255,0.8)',
+                        boxShadow: deviceSearchLower ? `0 0 8px ${color}, 0 0 14px ${color}88` : `0 0 5px ${color}88`,
                       }}
                     />
                   </div>
