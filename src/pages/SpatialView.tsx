@@ -62,6 +62,7 @@ interface DotInfo {
   timestamp: number
   wrongLocation: boolean
   completed: boolean | null
+  duration_seconds: number | null
 }
 
 function DotTooltip({ info, style }: { info: DotInfo; style?: React.CSSProperties }) {
@@ -74,6 +75,9 @@ function DotTooltip({ info, style }: { info: DotInfo; style?: React.CSSPropertie
       <p className="text-gray-300">Device: <span className="text-white font-mono">{info.device_id}</span></p>
       <p className="text-gray-300">Pos: ({info.x.toFixed(2)}, {info.z.toFixed(2)})</p>
       <p className="text-gray-300">{msToLabel(info.timestamp)}</p>
+      {info.duration_seconds != null && (
+        <p className="text-gray-300">Duration: <span className="text-white">{info.duration_seconds}s</span></p>
+      )}
       <p style={{ color }}>{dotLabel(info.wrongLocation, info.completed)}</p>
     </div>
   )
@@ -92,6 +96,7 @@ interface Point {
   timestamp: number
   wrongLocation: boolean
   completed: boolean | null
+  duration_seconds: number | null
 }
 
 // ── CalibrationPanel ─────────────────────────────────────────────────────────
@@ -198,6 +203,10 @@ export default function SpatialView() {
   const [deviceFilter, setDeviceFilter] = useState('')
   const [expFilter, setExpFilter] = useState('')
 
+  // duration filter
+  const [minDuration, setMinDuration] = useState('')
+  const [maxDuration, setMaxDuration] = useState('')
+
   // map controls
   const [wrongLocationOnly, setWrongLocationOnly] = useState(false)
   const [showHeadings, setShowHeadings] = useState(true)
@@ -290,17 +299,18 @@ export default function SpatialView() {
       >[]
 
       const sessionIds = evs.map((e) => e.session_id).filter(Boolean) as string[]
-      const sessionMap = new Map<string, { completed: boolean; wrongLocation: boolean }>()
+      const sessionMap = new Map<string, { completed: boolean; wrongLocation: boolean; duration_seconds: number | null }>()
 
       if (sessionIds.length > 0) {
         const { data: sessData } = await supabase
           .from('experience_sessions')
-          .select('session_id, was_completed, was_wrong_location')
+          .select('session_id, was_completed, was_wrong_location, duration_seconds')
           .in('session_id', sessionIds.slice(0, 500))
-        for (const s of (sessData ?? []) as Pick<ExperienceSession, 'session_id' | 'was_completed' | 'was_wrong_location'>[]) {
+        for (const s of (sessData ?? []) as Pick<ExperienceSession, 'session_id' | 'was_completed' | 'was_wrong_location' | 'duration_seconds'>[]) {
           sessionMap.set(s.session_id, {
             completed: Boolean(s.was_completed),
             wrongLocation: s.was_wrong_location === 1,
+            duration_seconds: s.duration_seconds ?? null,
           })
         }
       }
@@ -324,6 +334,7 @@ export default function SpatialView() {
               timestamp: e.transitioned_at,
               wrongLocation: sess?.wrongLocation ?? false,
               completed: sess != null ? sess.completed : null,
+              duration_seconds: sess?.duration_seconds ?? null,
             }
           })
       )
@@ -336,8 +347,17 @@ export default function SpatialView() {
   const premises = [...new Set(points.map((p) => p.premise_id))].filter(Boolean)
   const devices = [...new Set(points.map((p) => p.device_id))].filter(Boolean)
 
-  const visiblePoints = wrongLocationOnly ? points.filter((p) => p.wrongLocation) : points
-  const wrongCount = points.filter((p) => p.wrongLocation).length
+  const minDurSec = minDuration !== '' ? Number(minDuration) : null
+  const maxDurSec = maxDuration !== '' ? Number(maxDuration) : null
+
+  const durationFiltered = points.filter((p) => {
+    if (minDurSec !== null && (p.duration_seconds == null || p.duration_seconds < minDurSec)) return false
+    if (maxDurSec !== null && (p.duration_seconds == null || p.duration_seconds > maxDurSec)) return false
+    return true
+  })
+
+  const visiblePoints = wrongLocationOnly ? durationFiltered.filter((p) => p.wrongLocation) : durationFiltered
+  const wrongCount = durationFiltered.filter((p) => p.wrongLocation).length
 
   // effective config: use live calibration overrides when calibrating
   const effectiveCfg = (calibrating && calibCfg) ? calibCfg : mapConfig
@@ -397,11 +417,45 @@ export default function SpatialView() {
         <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e) }} />
         <FilterSelect options={premises} value={premiseFilter} onChange={setPremiseFilter} placeholder="All Premises" />
         <FilterSelect options={devices} value={deviceFilter} onChange={setDeviceFilter} placeholder="All Devices" />
+        <div className="flex items-center gap-1 text-xs text-gray-400" title="Filter by session duration to exclude outliers (e.g. set max to remove crash/reset noise, or min to remove instant failures)">
+          <span>Duration (s):</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="min s"
+            value={minDuration}
+            onChange={(e) => setMinDuration(e.target.value)}
+            className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+          />
+          <span>–</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="max s"
+            value={maxDuration}
+            onChange={(e) => setMaxDuration(e.target.value)}
+            className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+          />
+          {(minDuration || maxDuration) && (
+            <button
+              onClick={() => { setMinDuration(''); setMaxDuration('') }}
+              className="text-gray-500 hover:text-gray-300 ml-1"
+              title="Clear duration filter"
+            >✕</button>
+          )}
+        </div>
       </div>
 
       <div className="card text-sm text-amber-400 bg-amber-950/30 border-amber-800">
         Spatial data is only available from 2026-06-25 onwards. Points show where each headset was when the session started (PreExperience → ExperienceStart transition).
       </div>
+
+      {(minDuration || maxDuration) && (
+        <div className="text-xs text-indigo-400 bg-indigo-950/30 border border-indigo-800 rounded px-3 py-2">
+          Duration filter active — use this to exclude outliers: e.g. set <strong>max = 30s</strong> to isolate instant failures/resets, or <strong>min = 60s</strong> to exclude sessions too short to be real plays.
+          Showing {durationFiltered.length} of {points.length} points.
+        </div>
+      )}
 
       {loading ? (
         <p className="text-gray-500 text-sm">Loading…</p>
@@ -555,7 +609,7 @@ export default function SpatialView() {
                       const rect = containerRef.current?.getBoundingClientRect()
                       if (!rect) return
                       setHoveredDot({
-                        info: { device_id: pt.device_id, x: pt.x, z: pt.z, timestamp: pt.timestamp, wrongLocation: pt.wrongLocation, completed: pt.completed },
+                        info: { device_id: pt.device_id, x: pt.x, z: pt.z, timestamp: pt.timestamp, wrongLocation: pt.wrongLocation, completed: pt.completed, duration_seconds: pt.duration_seconds },
                         px: (px * zoom + pan.x) + rect.left,
                         py: (py * zoom + pan.y) + rect.top,
                       })
