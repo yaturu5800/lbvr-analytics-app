@@ -94,6 +94,96 @@ interface Point {
   completed: boolean | null
 }
 
+// ── CalibrationPanel ─────────────────────────────────────────────────────────
+
+interface CalibPanelProps {
+  cfg: VenueMapConfig
+  onChange: (next: VenueMapConfig) => void
+  onSave: () => void
+  onDiscard: () => void
+  saving: boolean
+  dataBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null
+}
+
+function CalibrationPanel({ cfg, onChange, onSave, onDiscard, saving, dataBounds }: CalibPanelProps) {
+  const field = (key: keyof VenueMapConfig, step: number, min: number, max: number, label: string) => (
+    <div className="flex items-center gap-2">
+      <label className="text-xs text-gray-400 w-24 shrink-0">{label}</label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={Number(cfg[key])}
+        onChange={(e) => onChange({ ...cfg, [key]: Number(e.target.value) })}
+        className="flex-1 accent-indigo-500"
+      />
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={Number(cfg[key])}
+        onChange={(e) => onChange({ ...cfg, [key]: Number(e.target.value) })}
+        className="w-20 text-xs bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-white text-right"
+      />
+    </div>
+  )
+
+  return (
+    <div className="border-b border-gray-800 bg-gray-900/80 px-4 py-3 space-y-2.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wide">Map Calibration</span>
+        {dataBounds && (
+          <span className="text-xs text-gray-500">
+            Data X [{dataBounds.minX.toFixed(2)}, {dataBounds.maxX.toFixed(2)}] &nbsp;
+            Z [{dataBounds.minZ.toFixed(2)}, {dataBounds.maxZ.toFixed(2)}]
+          </span>
+        )}
+      </div>
+      {field('scale', 1, 1, 500, 'Scale (px/m)')}
+      {field('offset_x', 0.1, -100, 100, 'Offset X (m)')}
+      {field('offset_y', 0.1, -100, 100, 'Offset Y (m)')}
+      {field('rotation_deg', 1, 0, 359, 'Rotation (°)')}
+      <div className="flex items-center gap-6 pt-1">
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={Boolean(cfg.flip_x)}
+            onChange={(e) => onChange({ ...cfg, flip_x: e.target.checked })}
+            className="accent-indigo-500"
+          />
+          Flip X
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={Boolean(cfg.flip_y)}
+            onChange={(e) => onChange({ ...cfg, flip_y: e.target.checked })}
+            className="accent-indigo-500"
+          />
+          Flip Y
+        </label>
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={onDiscard}
+            className="text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+          >Discard</button>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="text-xs px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50"
+          >{saving ? 'Saving…' : 'Save to Supabase'}</button>
+        </div>
+      </div>
+      <p className="text-xs text-gray-600">
+        Origin crosshair (⊕) shows where Unity (0, 0) maps on the image.
+        Adjust until dots align with expected rooms.
+      </p>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SpatialView() {
@@ -111,9 +201,15 @@ export default function SpatialView() {
   // map controls
   const [wrongLocationOnly, setWrongLocationOnly] = useState(false)
   const [showHeadings, setShowHeadings] = useState(true)
+  const [showOrigin, setShowOrigin] = useState(true)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [hoveredDot, setHoveredDot] = useState<{ info: DotInfo; px: number; py: number } | null>(null)
+
+  // calibration
+  const [calibrating, setCalibrating] = useState(false)
+  const [calibCfg, setCalibCfg] = useState<VenueMapConfig | null>(null)
+  const [calibSaving, setCalibSaving] = useState(false)
 
   const isDragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
@@ -123,14 +219,51 @@ export default function SpatialView() {
   useEffect(() => {
     async function loadConfig() {
       setMapConfigLoaded(false)
+      setCalibrating(false)
       let q = supabase.from('venue_map_config').select('*')
       if (premiseFilter) q = q.eq('premise_id', premiseFilter)
       const { data } = await q.limit(1)
-      setMapConfig(data?.[0] ?? null)
+      const cfg = data?.[0] ?? null
+      setMapConfig(cfg)
+      setCalibCfg(cfg ? { ...cfg } : null)
       setMapConfigLoaded(true)
     }
     loadConfig()
   }, [premiseFilter])
+
+  // ── Calibration handlers ─────────────────────────────────────────────────────
+  const startCalibration = () => {
+    if (mapConfig) setCalibCfg({ ...mapConfig })
+    setCalibrating(true)
+  }
+
+  const discardCalibration = () => {
+    if (mapConfig) setCalibCfg({ ...mapConfig })
+    setCalibrating(false)
+  }
+
+  const saveCalibration = async () => {
+    if (!calibCfg) return
+    setCalibSaving(true)
+    const { error } = await supabase
+      .from('venue_map_config')
+      .update({
+        scale: calibCfg.scale,
+        offset_x: calibCfg.offset_x,
+        offset_y: calibCfg.offset_y,
+        rotation_deg: calibCfg.rotation_deg,
+        flip_x: calibCfg.flip_x,
+        flip_y: calibCfg.flip_y,
+      })
+      .eq('premise_id', calibCfg.premise_id)
+    setCalibSaving(false)
+    if (!error) {
+      setMapConfig({ ...calibCfg })
+      setCalibrating(false)
+    } else {
+      alert('Save failed: ' + error.message)
+    }
+  }
 
   // ── Load session data ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -205,6 +338,17 @@ export default function SpatialView() {
   const visiblePoints = wrongLocationOnly ? points.filter((p) => p.wrongLocation) : points
   const wrongCount = points.filter((p) => p.wrongLocation).length
 
+  // effective config: use live calibration overrides when calibrating
+  const effectiveCfg = (calibrating && calibCfg) ? calibCfg : mapConfig
+
+  // data bounds for the calibration helper
+  const dataBounds = points.length > 0 ? {
+    minX: Math.min(...points.map((p) => p.x)),
+    maxX: Math.max(...points.map((p) => p.x)),
+    minZ: Math.min(...points.map((p) => p.z)),
+    maxZ: Math.max(...points.map((p) => p.z)),
+  } : null
+
   // ── Pan / zoom handlers ──────────────────────────────────────────────────────
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
@@ -238,6 +382,11 @@ export default function SpatialView() {
 
   const useFloorPlan = mapConfigLoaded && mapConfig != null && mapConfig.image_path != null
   const imageUrl = (useFloorPlan && mapConfig!.image_path) ? mapImageUrl(mapConfig!.image_path) : null
+
+  // origin crosshair position (where Unity 0,0 maps — always offset_x*scale, offset_y*scale)
+  const originPx = effectiveCfg
+    ? { x: effectiveCfg.offset_x * effectiveCfg.scale, y: effectiveCfg.offset_y * effectiveCfg.scale }
+    : null
 
   return (
     <div className="space-y-6">
@@ -313,8 +462,28 @@ export default function SpatialView() {
                 className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400"
               >Reset</button>
               <span className="text-xs text-gray-600 ml-1">{Math.round(zoom * 100)}%</span>
+              <button
+                onClick={calibrating ? discardCalibration : startCalibration}
+                className={`text-xs px-2.5 py-1 rounded ml-2 transition-colors ${
+                  calibrating
+                    ? 'bg-yellow-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >{calibrating ? 'Exit Calibrate' : 'Calibrate'}</button>
             </div>
           </div>
+
+          {/* Calibration panel */}
+          {calibrating && calibCfg && (
+            <CalibrationPanel
+              cfg={calibCfg}
+              onChange={setCalibCfg}
+              onSave={saveCalibration}
+              onDiscard={discardCalibration}
+              saving={calibSaving}
+              dataBounds={dataBounds}
+            />
+          )}
 
           {/* Map canvas */}
           <div
@@ -347,12 +516,33 @@ export default function SpatialView() {
                 />
               )}
 
+              {/* Origin crosshair — shows where Unity (0,0) maps on the image */}
+              {originPx && (showOrigin || calibrating) && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: originPx.x,
+                    top: originPx.y,
+                    transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none',
+                    zIndex: 30,
+                  }}
+                >
+                  <svg width="28" height="28" viewBox="-14 -14 28 28" overflow="visible">
+                    <line x1="-14" y1="0" x2="14" y2="0" stroke="#facc15" strokeWidth="1.5" />
+                    <line x1="0" y1="-14" x2="0" y2="14" stroke="#facc15" strokeWidth="1.5" />
+                    <circle cx="0" cy="0" r="5" fill="none" stroke="#facc15" strokeWidth="1.5" />
+                    <circle cx="0" cy="0" r="1.5" fill="#facc15" />
+                  </svg>
+                </div>
+              )}
+
               {/* Session dots */}
-              {mapConfig && visiblePoints.map((pt) => {
-                const { x: px, y: py } = unityToPixel(pt.x, pt.z, mapConfig)
+              {effectiveCfg && visiblePoints.map((pt) => {
+                const { x: px, y: py } = unityToPixel(pt.x, pt.z, effectiveCfg)
                 const color = dotColor(pt.wrongLocation, pt.completed)
                 const headingDeg = (showHeadings && pt.rot)
-                  ? quaternionToMapAngleDeg(pt.rot, mapConfig)
+                  ? quaternionToMapAngleDeg(pt.rot, effectiveCfg)
                   : null
                 const DOT = 12
 
@@ -360,7 +550,7 @@ export default function SpatialView() {
                   <div
                     key={pt.event_id}
                     style={{ position: 'absolute', left: px, top: py, transform: 'translate(-50%, -50%)', zIndex: 10 }}
-                    onMouseEnter={(e) => {
+                    onMouseEnter={() => {
                       const rect = containerRef.current?.getBoundingClientRect()
                       if (!rect) return
                       setHoveredDot({
@@ -415,6 +605,19 @@ export default function SpatialView() {
                 )
               })}
             </div>
+
+            {/* Origin toggle (bottom-left, only when not calibrating) */}
+            {!calibrating && (
+              <div className="absolute bottom-3 left-3 z-30">
+                <button
+                  onClick={() => setShowOrigin((v) => !v)}
+                  title="Toggle origin crosshair"
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    showOrigin ? 'bg-yellow-700/70 text-yellow-200' : 'bg-gray-800/70 text-gray-500'
+                  }`}
+                >⊕ origin</button>
+              </div>
+            )}
 
             {/* Floating tooltip */}
             {hoveredDot && (
