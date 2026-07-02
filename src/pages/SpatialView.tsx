@@ -63,6 +63,7 @@ interface DotInfo {
   wrongLocation: boolean
   completed: boolean | null
   duration_seconds: number | null
+  last_stage_seen: string | null
 }
 
 function DotTooltip({ info, style }: { info: DotInfo; style?: React.CSSProperties }) {
@@ -79,6 +80,9 @@ function DotTooltip({ info, style }: { info: DotInfo; style?: React.CSSPropertie
         <p className="text-gray-300">Duration: <span className="text-white">{info.duration_seconds}s</span></p>
       )}
       <p style={{ color }}>{dotLabel(info.wrongLocation, info.completed)}</p>
+      {info.last_stage_seen != null && (
+        <p className="text-gray-400">Last stage: <span className="text-gray-200">{info.last_stage_seen}</span></p>
+      )}
     </div>
   )
 }
@@ -97,6 +101,7 @@ interface Point {
   wrongLocation: boolean
   completed: boolean | null
   duration_seconds: number | null
+  last_stage_seen: string | null
 }
 
 // ── CalibrationPanel ─────────────────────────────────────────────────────────
@@ -301,21 +306,31 @@ export default function SpatialView() {
         'event_id' | 'device_id' | 'premise_id' | 'session_id' | 'transitioned_at' | 'position_x' | 'position_z' | 'rotation_x' | 'rotation_y' | 'rotation_z' | 'rotation_w'
       >[]
 
-      const sessionIds = evs.map((e) => e.session_id).filter(Boolean) as string[]
-      const sessionMap = new Map<string, { completed: boolean; wrongLocation: boolean; duration_seconds: number | null }>()
+      const sessionIds = [...new Set(evs.map((e) => e.session_id).filter(Boolean) as string[])]
+      const sessionMap = new Map<string, { completed: boolean; wrongLocation: boolean; duration_seconds: number | null; last_stage_seen: string | null }>()
 
       if (sessionIds.length > 0) {
-        const { data: sessData } = await supabase
-          .from('experience_sessions')
-          .select('session_id, was_completed, was_wrong_location, duration_seconds')
-          .in('session_id', sessionIds.slice(0, 500))
-        for (const s of (sessData ?? []) as Pick<ExperienceSession, 'session_id' | 'was_completed' | 'was_wrong_location' | 'duration_seconds'>[]) {
-          sessionMap.set(s.session_id, {
-            completed: Boolean(s.was_completed),
-            wrongLocation: s.was_wrong_location === 1,
-            duration_seconds: s.duration_seconds ?? null,
-          })
+        const BATCH = 500
+        const batches: Promise<void>[] = []
+        for (let i = 0; i < sessionIds.length; i += BATCH) {
+          batches.push(
+            supabase
+              .from('experience_sessions')
+              .select('session_id, was_completed, was_wrong_location, duration_seconds, last_stage_seen')
+              .in('session_id', sessionIds.slice(i, i + BATCH))
+              .then(({ data }) => {
+                for (const s of (data ?? []) as Pick<ExperienceSession, 'session_id' | 'was_completed' | 'was_wrong_location' | 'duration_seconds' | 'last_stage_seen'>[]) {
+                  sessionMap.set(s.session_id, {
+                    completed: Boolean(s.was_completed),
+                    wrongLocation: s.was_wrong_location === 1,
+                    duration_seconds: s.duration_seconds ?? null,
+                    last_stage_seen: s.last_stage_seen ?? null,
+                  })
+                }
+              })
+          )
         }
+        await Promise.all(batches)
       }
 
       setPoints(
@@ -338,6 +353,7 @@ export default function SpatialView() {
               wrongLocation: sess?.wrongLocation ?? false,
               completed: sess != null ? sess.completed : null,
               duration_seconds: sess?.duration_seconds ?? null,
+              last_stage_seen: sess?.last_stage_seen ?? null,
             }
           })
       )
@@ -642,7 +658,7 @@ export default function SpatialView() {
                       const rect = containerRef.current?.getBoundingClientRect()
                       if (!rect) return
                       setHoveredDot({
-                        info: { device_id: pt.device_id, x: pt.x, z: pt.z, timestamp: pt.timestamp, wrongLocation: pt.wrongLocation, completed: pt.completed, duration_seconds: pt.duration_seconds },
+                        info: { device_id: pt.device_id, x: pt.x, z: pt.z, timestamp: pt.timestamp, wrongLocation: pt.wrongLocation, completed: pt.completed, duration_seconds: pt.duration_seconds, last_stage_seen: pt.last_stage_seen },
                         px: (px * zoom + pan.x) + rect.left,
                         py: (py * zoom + pan.y) + rect.top,
                       })
@@ -782,6 +798,9 @@ export default function SpatialView() {
                         <p style={{ color: dotColor(p.wrongLocation, p.completed) }}>
                           {dotLabel(p.wrongLocation, p.completed)}
                         </p>
+                        {p.last_stage_seen != null && (
+                          <p className="text-gray-400">Last stage: <span className="text-gray-200">{p.last_stage_seen}</span></p>
+                        )}
                       </div>
                     )
                   }}

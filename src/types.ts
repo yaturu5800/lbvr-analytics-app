@@ -14,6 +14,7 @@ export interface ExperienceSession {
   was_wrong_location: number
   experience_start_duration_ms: number | null
   group_id: string | null
+  last_stage_seen: string | null
   created_at: string
 }
 
