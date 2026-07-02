@@ -314,11 +314,12 @@ export default function SpatialView() {
         const batches: Promise<void>[] = []
         for (let i = 0; i < sessionIds.length; i += BATCH) {
           batches.push(
-            supabase
-              .from('experience_sessions')
-              .select('session_id, was_completed, was_wrong_location, duration_seconds, last_stage_seen')
-              .in('session_id', sessionIds.slice(i, i + BATCH))
-              .then(({ data }) => {
+            (async () => {
+              const { data } = await supabase
+                .from('experience_sessions')
+                .select('session_id, was_completed, was_wrong_location, duration_seconds, last_stage_seen')
+                .in('session_id', sessionIds.slice(i, i + BATCH))
+
                 for (const s of (data ?? []) as Pick<ExperienceSession, 'session_id' | 'was_completed' | 'was_wrong_location' | 'duration_seconds' | 'last_stage_seen'>[]) {
                   sessionMap.set(s.session_id, {
                     completed: Boolean(s.was_completed),
@@ -327,7 +328,7 @@ export default function SpatialView() {
                     last_stage_seen: s.last_stage_seen ?? null,
                   })
                 }
-              })
+            })()
           )
         }
         await Promise.all(batches)
