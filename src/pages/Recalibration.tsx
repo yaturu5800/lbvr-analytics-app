@@ -33,6 +33,8 @@ export default function Recalibration() {
   const [end, setEnd] = useState(new Date())
   const [premiseFilter, setPremiseFilter] = useState('')
   const [expFilter, setExpFilter] = useState('')
+  const [minDuration, setMinDuration] = useState('')
+  const [maxDuration, setMaxDuration] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -58,11 +60,22 @@ export default function Recalibration() {
   const premises = [...new Set(events.map((e) => e.premise_id))].filter(Boolean)
   const experiences = [...new Set(events.map((e) => e.experience_id))].filter(Boolean)
 
+  // ── Duration filter (client-side, stage_duration_ms → seconds) ───────────
+  const minDurSec = minDuration !== '' ? Number(minDuration) : null
+  const maxDurSec = maxDuration !== '' ? Number(maxDuration) : null
+  const filteredEvents = events.filter((e) => {
+    const sec = e.stage_duration_ms != null ? e.stage_duration_ms / 1000 : null
+    if (minDurSec !== null && (sec == null || sec < minDurSec)) return false
+    if (maxDurSec !== null && (sec == null || sec > maxDurSec)) return false
+    return true
+  })
+  const durationFilterActive = minDuration !== '' || maxDuration !== ''
+
   // ── Metrics ───────────────────────────────────────────────────────────────
-  const total = events.length
-  const operatorTriggered = events.filter((e) => e.was_operator_triggered === 1).length
-  const devicesAffected = new Set(events.map((e) => e.device_id)).size
-  const durationsMs = events.filter((e) => e.stage_duration_ms != null).map((e) => e.stage_duration_ms!)
+  const total = filteredEvents.length
+  const operatorTriggered = filteredEvents.filter((e) => e.was_operator_triggered === 1).length
+  const devicesAffected = new Set(filteredEvents.map((e) => e.device_id)).size
+  const durationsMs = filteredEvents.filter((e) => e.stage_duration_ms != null).map((e) => e.stage_duration_ms!)
   const avgDurationSec =
     durationsMs.length > 0
       ? (durationsMs.reduce((a, b) => a + b, 0) / durationsMs.length / 1000).toFixed(1)
@@ -70,7 +83,7 @@ export default function Recalibration() {
 
   // ── Trend over time (by day) ──────────────────────────────────────────────
   const byDay: Record<string, number> = {}
-  for (const e of events) {
+  for (const e of filteredEvents) {
     const day = msToDay(e.transitioned_at)
     byDay[day] = (byDay[day] ?? 0) + 1
   }
@@ -80,7 +93,7 @@ export default function Recalibration() {
 
   // ── By hour of day ────────────────────────────────────────────────────────
   const byHour: Record<number, number> = {}
-  for (const e of events) {
+  for (const e of filteredEvents) {
     const h = new Date(e.transitioned_at).getHours()
     byHour[h] = (byHour[h] ?? 0) + 1
   }
@@ -91,7 +104,7 @@ export default function Recalibration() {
 
   // ── Top offending devices ─────────────────────────────────────────────────
   const deviceCounts: Record<string, { count: number; durationSum: number; durationN: number }> = {}
-  for (const e of events) {
+  for (const e of filteredEvents) {
     if (!deviceCounts[e.device_id]) deviceCounts[e.device_id] = { count: 0, durationSum: 0, durationN: 0 }
     deviceCounts[e.device_id].count++
     if (e.stage_duration_ms != null) {
@@ -110,7 +123,7 @@ export default function Recalibration() {
 
   // ── Operator vs player per day ────────────────────────────────────────────
   const triggerByDay: Record<string, { operator: number; player: number }> = {}
-  for (const e of events) {
+  for (const e of filteredEvents) {
     const day = msToDay(e.transitioned_at)
     if (!triggerByDay[day]) triggerByDay[day] = { operator: 0, player: 0 }
     if (e.was_operator_triggered === 1) triggerByDay[day].operator++
@@ -121,7 +134,7 @@ export default function Recalibration() {
     .sort((a, b) => a.day.localeCompare(b.day))
 
   // ── Recent events table ───────────────────────────────────────────────────
-  const recentEvents = events.slice(0, 200)
+  const recentEvents = filteredEvents.slice(0, 200)
 
   return (
     <div className="space-y-6">
@@ -130,7 +143,44 @@ export default function Recalibration() {
         <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e) }} />
         <FilterSelect options={premises} value={premiseFilter} onChange={setPremiseFilter} placeholder="All Premises" />
         <FilterSelect options={experiences} value={expFilter} onChange={setExpFilter} placeholder="All Experiences" />
+        <div
+          className="flex items-center gap-1 text-xs text-gray-400"
+          title="Filter by calibration duration to exclude outliers (e.g. set max=10 to remove instant recals, min=30 to remove very short ones)"
+        >
+          <span>Duration (s):</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="min"
+            value={minDuration}
+            onChange={(e) => setMinDuration(e.target.value)}
+            className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+          />
+          <span>–</span>
+          <input
+            type="number"
+            min={0}
+            placeholder="max"
+            value={maxDuration}
+            onChange={(e) => setMaxDuration(e.target.value)}
+            className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+          />
+          {durationFilterActive && (
+            <button
+              onClick={() => { setMinDuration(''); setMaxDuration('') }}
+              className="text-gray-500 hover:text-gray-300 ml-1"
+              title="Clear duration filter"
+            >✕</button>
+          )}
+        </div>
       </div>
+
+      {durationFilterActive && (
+        <div className="text-xs text-indigo-400 bg-indigo-950/30 border border-indigo-800 rounded px-3 py-2">
+          Duration filter active — showing {filteredEvents.length} of {events.length} events.
+          Use this to exclude outliers: e.g. <strong>max = 10s</strong> removes instant recalibrations, <strong>min = 30s</strong> removes unusually short ones.
+        </div>
+      )}
 
       {loading ? (
         <p className="text-gray-500 text-sm">Loading…</p>
