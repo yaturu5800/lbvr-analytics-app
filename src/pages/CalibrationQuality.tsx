@@ -188,6 +188,7 @@ export default function CalibrationQuality() {
       sessionCount,
       recalCount,
       recalsPerSession: sessionCount > 0 ? recalCount / sessionCount : null,
+      confirmsPerSession: sessionCount > 0 ? devEvents.length / sessionCount : null,
     }
   }).sort((a, b) => {
     // No calibration data → bottom; otherwise sort by avgMeshes ascending (worst first)
@@ -198,13 +199,13 @@ export default function CalibrationQuality() {
 
   // ── Correlation scatter data (only devices with both calibration + session data) ──
   const scatterData = deviceStats
-    .filter((d) => d.avgMeshes !== null && d.sessionCount > 0)
+    .filter((d) => d.avgMeshes !== null && d.sessionCount > 0 && d.confirmsPerSession !== null)
     .map((d) => ({
       device: d.id,
       avgMeshes: +d.avgMeshes!.toFixed(1),
-      recalsPerSession: d.recalsPerSession !== null ? +d.recalsPerSession.toFixed(2) : 0,
+      confirmsPerSession: +d.confirmsPerSession!.toFixed(2),
       sessions: d.sessionCount,
-      recalibrations: d.recalCount,
+      confirms: d.total,
     }))
 
   return (
@@ -376,11 +377,11 @@ export default function CalibrationQuality() {
               {scatterData.length > 0 && (
                 <div className="card">
                   <h2 className="text-sm font-semibold text-gray-400 mb-1">
-                    Scan Mesh Quality vs. Recalibrations per Session
+                    Scan Mesh Quality vs. Calibration Confirms per Session
                   </h2>
                   <p className="text-xs text-gray-600 mb-4">
-                    Per-device correlation — each dot is a device. Lower mesh count at calibration may predict more
-                    in-session recalibrations per session played.
+                    Per-device correlation — each dot is a device. Lower mesh count at calibration confirm may predict
+                    more calibration confirms per session played.
                   </p>
                   <ResponsiveContainer width="100%" height={260}>
                     <ScatterChart margin={{ top: 8, right: 24, bottom: 24, left: 0 }}>
@@ -393,25 +394,25 @@ export default function CalibrationQuality() {
                         label={{ value: 'Avg Scan Meshes', position: 'insideBottom', offset: -12, fill: '#6b7280', fontSize: 11 }}
                       />
                       <YAxis
-                        dataKey="recalsPerSession"
+                        dataKey="confirmsPerSession"
                         type="number"
-                        name="Recals / Session"
+                        name="Confirms / Session"
                         tick={{ fontSize: 10, fill: '#9ca3af' }}
-                        label={{ value: 'Recals / Session', angle: -90, position: 'insideLeft', fill: '#6b7280', fontSize: 11 }}
+                        label={{ value: 'Confirms / Session', angle: -90, position: 'insideLeft', fill: '#6b7280', fontSize: 11 }}
                       />
                       <Tooltip
                         {...TOOLTIP_STYLE}
                         cursor={{ strokeDasharray: '3 3' }}
                         content={({ active, payload }) => {
                           if (!active || !payload?.length) return null
-                          const d = payload[0].payload as { device: string; avgMeshes: number; recalsPerSession: number; sessions: number; recalibrations: number }
+                          const d = payload[0].payload as { device: string; avgMeshes: number; confirmsPerSession: number; sessions: number; confirms: number }
                           return (
                             <div className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs">
                               <p className="font-mono text-indigo-400 mb-1">{d.device}</p>
                               <p className="text-gray-300">Avg meshes: <span className="text-white">{d.avgMeshes}</span></p>
-                              <p className="text-gray-300">Recals / session: <span className="text-white">{d.recalsPerSession.toFixed(2)}</span></p>
+                              <p className="text-gray-300">Confirms / session: <span className="text-white">{d.confirmsPerSession.toFixed(2)}</span></p>
                               <p className="text-gray-300">Total sessions: <span className="text-white">{d.sessions}</span></p>
-                              <p className="text-gray-300">Total recals: <span className="text-white">{d.recalibrations}</span></p>
+                              <p className="text-gray-300">Total confirms: <span className="text-white">{d.confirms}</span></p>
                             </div>
                           )
                         }}
@@ -445,7 +446,7 @@ export default function CalibrationQuality() {
                       <th className="text-right pb-2 pr-4">Sessions</th>
                       <th className="text-right pb-2 pr-4">Confirms</th>
                       <th className="text-right pb-2 pr-4">Avg Meshes</th>
-                      <th className="text-right pb-2 pr-4">Recals / Session</th>
+                      <th className="text-right pb-2 pr-4">Confirms / Session</th>
                       <th className="text-left pb-2 pr-4">Top Method</th>
                       <th className="text-right pb-2 pr-4">Low-Mesh %</th>
                       <th className="text-left pb-2">Last Calibration</th>
@@ -482,8 +483,8 @@ export default function CalibrationQuality() {
                         <td className={`py-2 pr-4 text-right text-xs font-mono font-semibold ${meshColor(d.avgMeshes)}`}>
                           {d.avgMeshes !== null ? d.avgMeshes.toFixed(1) : '—'}
                         </td>
-                        <td className={`py-2 pr-4 text-right text-xs font-mono ${d.recalsPerSession !== null && d.recalsPerSession > 1 ? 'text-orange-400' : 'text-gray-300'}`}>
-                          {d.recalsPerSession !== null ? d.recalsPerSession.toFixed(2) : '—'}
+                        <td className={`py-2 pr-4 text-right text-xs font-mono ${d.confirmsPerSession !== null && d.confirmsPerSession > 1 ? 'text-orange-400' : 'text-gray-300'}`}>
+                          {d.confirmsPerSession !== null ? d.confirmsPerSession.toFixed(2) : '—'}
                         </td>
                         <td className="py-2 pr-4 text-xs">
                           {d.hasCalibrationData ? (
