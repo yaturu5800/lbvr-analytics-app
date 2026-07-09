@@ -14,6 +14,7 @@ const analyticsNav = [
   { to: '/durations', label: 'Durations' },
   { to: '/wrong-location', label: 'Wrong Location' },
   { to: '/recalibration', label: 'Recalibration' },
+  { to: '/calibration-quality', label: 'Calibration Quality' },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

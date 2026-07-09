@@ -85,6 +85,27 @@ export interface VenueMapConfig {
   updated_at: number | null
 }
 
+export interface AnalyticsEvent {
+  event_id: string
+  device_id: string
+  app_version: string | null
+  event_name: string
+  parameters: string | null
+  received_at: number
+  created_at: string
+}
+
+export interface CalibrationEvent {
+  event_id: string
+  device_id: string
+  app_version: string | null
+  received_at: number
+  received_at_utc: string
+  calibration_method: 'points' | 'single_press' | 'skip_verify' | null
+  scan_meshes: number | null
+  created_at: string
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -92,12 +113,14 @@ export interface Database {
       device_health_snapshots: { Row: DeviceHealthSnapshot; Insert: DeviceHealthSnapshot; Update: Partial<DeviceHealthSnapshot> }
       session_stage_events: { Row: SessionStageEvent; Insert: SessionStageEvent; Update: Partial<SessionStageEvent> }
       venue_map_config: { Row: VenueMapConfig; Insert: VenueMapConfig; Update: Partial<VenueMapConfig> }
+      analytics_events: { Row: AnalyticsEvent; Insert: AnalyticsEvent; Update: Partial<AnalyticsEvent> }
     }
     Views: {
       session_outcomes: { Row: SessionOutcome }
       funnel_summary: { Row: FunnelSummary }
       recalibration_events: { Row: SessionStageEvent }
       wrong_location_starts: { Row: ExperienceSession }
+      calibration_events: { Row: CalibrationEvent }
     }
     Functions: Record<string, never>
     Enums: Record<string, never>
