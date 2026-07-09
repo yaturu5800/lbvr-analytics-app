@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { msToDay, msToLabel, pct } from '../lib/utils'
-import type { CalibrationEvent, SessionStageEvent } from '../types'
+import type { CalibrationEvent, ExperienceSession, SessionStageEvent } from '../types'
 import MetricCard from '../components/MetricCard'
 import DateRangePicker from '../components/DateRangePicker'
 import FilterSelect from '../components/FilterSelect'
@@ -46,6 +46,7 @@ const TOOLTIP_STYLE = {
 export default function CalibrationQuality() {
   const [events, setEvents] = useState<CalibrationEvent[]>([])
   const [recalByDevice, setRecalByDevice] = useState<Record<string, number>>({})
+  const [sessionDeviceIds, setSessionDeviceIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [start, setStart] = useState(subDays(new Date(), 30))
   const [end, setEnd] = useState(new Date())
@@ -74,7 +75,14 @@ export default function CalibrationQuality() {
         .gte('transitioned_at', start.getTime())
         .lte('transitioned_at', end.getTime())
 
-      const [{ data: calData }, { data: recalData }] = await Promise.all([q, recalQ])
+      // Universe query: all devices that ran sessions in this window
+      const sessionQ = supabase
+        .from('experience_sessions')
+        .select('device_id')
+        .gte('started_at', start.getTime())
+        .lte('started_at', end.getTime())
+
+      const [{ data: calData }, { data: recalData }, { data: sessionData }] = await Promise.all([q, recalQ, sessionQ])
 
       setEvents((calData ?? []) as CalibrationEvent[])
 
@@ -84,17 +92,26 @@ export default function CalibrationQuality() {
         counts[row.device_id] = (counts[row.device_id] ?? 0) + 1
       }
       setRecalByDevice(counts)
+
+      const sessionIds = new Set<string>(
+        (sessionData ?? []).map((r) => (r as Pick<ExperienceSession, 'device_id'>).device_id).filter(Boolean)
+      )
+      setSessionDeviceIds(sessionIds)
       setLoading(false)
     }
     load()
   }, [start, end, deviceFilter, methodFilter])
 
-  const devices = [...new Set(events.map((e) => e.device_id))].filter(Boolean).sort()
+  // Union of all known devices (session universe + calibration events)
+  const calDeviceIds = new Set(events.map((e) => e.device_id).filter(Boolean))
+  const allDeviceIds = [...new Set([...sessionDeviceIds, ...calDeviceIds])].sort()
+  // devices with calibration data (for filter dropdown options)
+  const devices = allDeviceIds
   const methods = ['points', 'single_press', 'skip_verify']
 
   // ── Metrics ───────────────────────────────────────────────────────────────
   const total = events.length
-  const uniqueDevices = new Set(events.map((e) => e.device_id)).size
+  const uniqueDevices = calDeviceIds.size
   const meshValues = events.filter((e) => e.scan_meshes !== null).map((e) => e.scan_meshes!)
   const avgMeshes = meshValues.length > 0
     ? meshValues.reduce((a, b) => a + b, 0) / meshValues.length
@@ -140,8 +157,8 @@ export default function CalibrationQuality() {
     }
   })
 
-  // ── Device quality table ──────────────────────────────────────────────────
-  const deviceStats = devices.map((id) => {
+  // ── Device quality table (all session devices, zeros for those without calibration data) ──
+  const deviceStats = allDeviceIds.map((id) => {
     const devEvents = events.filter((e) => e.device_id === id)
     const devMeshes = devEvents.filter((e) => e.scan_meshes !== null).map((e) => e.scan_meshes!)
     const devAvg = devMeshes.length > 0
@@ -154,6 +171,7 @@ export default function CalibrationQuality() {
     }
     const topMethod = Object.entries(devMethodCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
     const lowMeshCount = devMeshes.filter((v) => v < 5).length
+    const hasCalibrationData = devEvents.length > 0
     return {
       id,
       total: devEvents.length,
@@ -161,8 +179,14 @@ export default function CalibrationQuality() {
       topMethod,
       lowMeshPct: devMeshes.length > 0 ? (lowMeshCount / devMeshes.length) * 100 : null,
       latestAt: devEvents[0]?.received_at ?? 0,
+      hasCalibrationData,
     }
-  }).sort((a, b) => (a.avgMeshes ?? 999) - (b.avgMeshes ?? 999))
+  }).sort((a, b) => {
+    // No calibration data → bottom; otherwise sort by avgMeshes ascending (worst first)
+    if (!a.hasCalibrationData && b.hasCalibrationData) return 1
+    if (a.hasCalibrationData && !b.hasCalibrationData) return -1
+    return (a.avgMeshes ?? 999) - (b.avgMeshes ?? 999)
+  })
 
   // ── Correlation scatter data ──────────────────────────────────────────────
   const scatterData = devices
@@ -202,7 +226,12 @@ export default function CalibrationQuality() {
           {/* Metric cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard label="Calibration Confirms" value={total} color="text-indigo-400" />
-            <MetricCard label="Unique Devices" value={uniqueDevices} color="text-teal-400" />
+            <MetricCard
+              label="Device Coverage"
+              value={`${uniqueDevices} / ${allDeviceIds.length}`}
+              color={uniqueDevices < allDeviceIds.length ? 'text-orange-400' : 'text-teal-400'}
+              sub={`${allDeviceIds.length - uniqueDevices} device${allDeviceIds.length - uniqueDevices === 1 ? '' : 's'} with no calibration data`}
+            />
             <MetricCard
               label="Avg Scan Meshes"
               value={avgMeshes !== null ? avgMeshes.toFixed(1) : '—'}
@@ -217,10 +246,15 @@ export default function CalibrationQuality() {
             />
           </div>
 
-          {total === 0 ? (
-            <EmptyState message="No calibration confirms in this date range" />
+          {total === 0 && allDeviceIds.length === 0 ? (
+            <EmptyState message="No calibration or session data in this date range" />
           ) : (
             <>
+              {total === 0 && (
+                <EmptyState message="No calibration confirms in this date range — session devices shown below" />
+              )}
+              {total > 0 && (
+              <>
               {/* Charts grid */}
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
@@ -389,11 +423,16 @@ export default function CalibrationQuality() {
                 </div>
               )}
 
-              {/* Device quality table */}
+              </>
+              )}
+
+              {/* Device quality table — always shown when any session/calibration data exists */}
+              {deviceStats.length > 0 && (
               <div className="card overflow-x-auto">
                 <h2 className="text-sm font-semibold text-gray-400 mb-1">Device Quality Summary</h2>
                 <p className="text-xs text-gray-600 mb-4">
-                  Sorted by avg scan meshes ascending — red badge = avg &lt; 5 meshes
+                  All devices that ran sessions in this window. Sorted by avg scan meshes ascending — devices without
+                  calibration data shown at the bottom.
                 </p>
                 <table className="w-full text-sm">
                   <thead>
@@ -403,12 +442,15 @@ export default function CalibrationQuality() {
                       <th className="text-right pb-2 pr-4">Avg Meshes</th>
                       <th className="text-left pb-2 pr-4">Top Method</th>
                       <th className="text-right pb-2 pr-4">Low-Mesh %</th>
-                      <th className="text-left pb-2">Last Seen</th>
+                      <th className="text-left pb-2">Last Calibration</th>
                     </tr>
                   </thead>
                   <tbody>
                     {deviceStats.map((d) => (
-                      <tr key={d.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                      <tr
+                        key={d.id}
+                        className={`border-b border-gray-800/50 hover:bg-gray-800/30 ${!d.hasCalibrationData ? 'opacity-50' : ''}`}
+                      >
                         <td className="py-2 pr-4">
                           <div className="flex items-center gap-2">
                             <Link
@@ -422,6 +464,11 @@ export default function CalibrationQuality() {
                                 Low mesh
                               </span>
                             )}
+                            {!d.hasCalibrationData && (
+                              <span className="text-[10px] bg-gray-800 text-gray-500 border border-gray-700 px-1.5 py-0.5 rounded">
+                                No data
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="py-2 pr-4 text-right text-xs text-gray-300">{d.total}</td>
@@ -429,16 +476,20 @@ export default function CalibrationQuality() {
                           {d.avgMeshes !== null ? d.avgMeshes.toFixed(1) : '—'}
                         </td>
                         <td className="py-2 pr-4 text-xs">
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                            style={{
-                              background: `${METHOD_COLOR[d.topMethod] ?? '#374151'}22`,
-                              color: METHOD_COLOR[d.topMethod] ?? '#9ca3af',
-                              border: `1px solid ${METHOD_COLOR[d.topMethod] ?? '#374151'}44`,
-                            }}
-                          >
-                            {METHOD_LABEL[d.topMethod] ?? d.topMethod}
-                          </span>
+                          {d.hasCalibrationData ? (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                              style={{
+                                background: `${METHOD_COLOR[d.topMethod] ?? '#374151'}22`,
+                                color: METHOD_COLOR[d.topMethod] ?? '#9ca3af',
+                                border: `1px solid ${METHOD_COLOR[d.topMethod] ?? '#374151'}44`,
+                              }}
+                            >
+                              {METHOD_LABEL[d.topMethod] ?? d.topMethod}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600">—</span>
+                          )}
                         </td>
                         <td className={`py-2 pr-4 text-right text-xs ${d.lowMeshPct !== null && d.lowMeshPct > 50 ? 'text-red-400' : 'text-gray-300'}`}>
                           {d.lowMeshPct !== null ? `${d.lowMeshPct.toFixed(0)}%` : '—'}
@@ -451,6 +502,7 @@ export default function CalibrationQuality() {
                   </tbody>
                 </table>
               </div>
+              )}
             </>
           )}
         </>
