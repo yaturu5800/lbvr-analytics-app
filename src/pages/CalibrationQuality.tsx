@@ -26,10 +26,8 @@ const METHOD_LABEL: Record<string, string> = {
 }
 
 const MESH_BUCKETS = [
-  { label: '0–4', min: 0, max: 5 },
-  { label: '5–9', min: 5, max: 10 },
-  { label: '10–19', min: 10, max: 20 },
-  { label: '20+', min: 20, max: Infinity },
+  ...Array.from({ length: 9 }, (_, i) => ({ label: String(i), min: i, max: i + 1 })),
+  { label: '9+', min: 9, max: Infinity },
 ]
 
 function meshColor(avg: number | null): string {
@@ -359,9 +357,9 @@ export default function CalibrationQuality() {
                           <Cell
                             key={i}
                             fill={
-                              entry.range === '0–4'
+                              i <= 4
                                 ? '#ef4444'
-                                : entry.range === '5–9'
+                                : i <= 8
                                 ? '#eab308'
                                 : '#22c55e'
                             }
