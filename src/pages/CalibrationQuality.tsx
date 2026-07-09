@@ -234,7 +234,7 @@ export default function CalibrationQuality() {
                       <YAxis type="category" dataKey="method" tick={{ fontSize: 11, fill: '#9ca3af' }} width={96} />
                       <Tooltip
                         {...TOOLTIP_STYLE}
-                        formatter={(v: number) => [`${v} confirms`, 'Count']}
+                        formatter={(v) => [`${v ?? 0} confirms`, 'Count']}
                       />
                       <Bar dataKey="Count" radius={[0, 4, 4, 0]}>
                         {methodData.map((entry) => (
@@ -268,7 +268,7 @@ export default function CalibrationQuality() {
                       <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} allowDecimals={false} />
                       <Tooltip
                         {...TOOLTIP_STYLE}
-                        formatter={(v: number, _n, props) => [`${v} meshes (n=${props.payload.n})`, 'Avg']}
+                        formatter={(v, _n, props) => [`${v ?? 0} meshes (n=${props.payload.n})`, 'Avg']}
                       />
                       <Bar dataKey="avg" radius={[4, 4, 0, 0]}>
                         {meshByMethod.map((entry) => (
@@ -314,7 +314,7 @@ export default function CalibrationQuality() {
                       <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} allowDecimals={false} />
                       <Tooltip
                         {...TOOLTIP_STYLE}
-                        formatter={(v: number) => [`${v} confirms`, 'Count']}
+                        formatter={(v) => [`${v ?? 0} confirms`, 'Count']}
                       />
                       <Bar dataKey="Count" radius={[4, 4, 0, 0]}>
                         {meshDist.map((entry, i) => (
