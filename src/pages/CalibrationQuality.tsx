@@ -187,6 +187,9 @@ export default function CalibrationQuality() {
       recalCount,
       recalsPerSession: sessionCount > 0 ? recalCount / sessionCount : null,
       confirmsPerSession: sessionCount > 0 ? devEvents.length / sessionCount : null,
+      skipVerifyPerSession: sessionCount > 0
+        ? devEvents.filter((e) => e.calibration_method === 'skip_verify').length / sessionCount
+        : null,
     }
   }).sort((a, b) => {
     // No calibration data → bottom; otherwise sort by avgMeshes ascending (worst first)
@@ -445,6 +448,7 @@ export default function CalibrationQuality() {
                       <th className="text-right pb-2 pr-4">Confirms</th>
                       <th className="text-right pb-2 pr-4">Avg Meshes</th>
                       <th className="text-right pb-2 pr-4">Confirms / Session</th>
+                      <th className="text-right pb-2 pr-4">Skip Verify / Session</th>
                       <th className="text-left pb-2 pr-4">Top Method</th>
                       <th className="text-right pb-2 pr-4">Low-Mesh %</th>
                       <th className="text-left pb-2">Last Calibration</th>
@@ -483,6 +487,9 @@ export default function CalibrationQuality() {
                         </td>
                         <td className={`py-2 pr-4 text-right text-xs font-mono ${d.confirmsPerSession !== null && d.confirmsPerSession > 1 ? 'text-orange-400' : 'text-gray-300'}`}>
                           {d.confirmsPerSession !== null ? d.confirmsPerSession.toFixed(2) : '—'}
+                        </td>
+                        <td className={`py-2 pr-4 text-right text-xs font-mono ${d.skipVerifyPerSession !== null && d.skipVerifyPerSession > 0 ? 'text-orange-400' : 'text-gray-300'}`}>
+                          {d.skipVerifyPerSession !== null ? d.skipVerifyPerSession.toFixed(2) : '—'}
                         </td>
                         <td className="py-2 pr-4 text-xs">
                           {d.hasCalibrationData ? (
