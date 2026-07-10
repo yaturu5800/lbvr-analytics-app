@@ -72,6 +72,7 @@ export default function CalibrationQuality() {
         .select('device_id')
         .gte('transitioned_at', start.getTime())
         .lte('transitioned_at', end.getTime())
+        .limit(10000)
 
       // Universe query: all devices that ran sessions in this window
       const sessionQ = supabase
@@ -79,6 +80,7 @@ export default function CalibrationQuality() {
         .select('device_id')
         .gte('started_at', start.getTime())
         .lte('started_at', end.getTime())
+        .limit(10000)
 
       const [{ data: calData }, { data: recalData }, { data: sessionData }] = await Promise.all([q, recalQ, sessionQ])
 
