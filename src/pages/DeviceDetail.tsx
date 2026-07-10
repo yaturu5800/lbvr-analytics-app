@@ -213,14 +213,16 @@ export default function DeviceDetail() {
                   const sessionCals = calBySession[s.session_id] ?? []
                   const sessionStages = eventsBySession[s.session_id] ?? []
 
+                  const hasCal = sessionCals.length > 0
+
                   return (
                     <>
                       <tr
                         key={s.session_id}
-                        className="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer"
+                        className={`border-b border-gray-800/50 cursor-pointer ${hasCal ? 'bg-indigo-950/25 hover:bg-indigo-950/40' : 'hover:bg-gray-800/30'}`}
                         onClick={() => toggleSession(s.session_id)}
                       >
-                        <td className="py-1.5 pr-2 text-gray-600 text-xs select-none">
+                        <td className={`py-1.5 pr-2 text-xs select-none border-l-2 ${hasCal ? 'border-indigo-500/70 text-indigo-400 pl-1.5' : 'border-transparent text-gray-600'}`}>
                           {isExpanded ? '▼' : '▶'}
                         </td>
                         <td className="py-1.5 pr-4 text-xs text-gray-400 whitespace-nowrap">
@@ -268,7 +270,7 @@ export default function DeviceDetail() {
                       {/* Expanded detail row */}
                       {isExpanded && (
                         <tr key={`${s.session_id}-expanded`} className="border-b border-gray-800/50">
-                          <td colSpan={7} className="pb-3 pt-1 px-4 bg-gray-900/40">
+                          <td colSpan={7} className={`pb-3 pt-1 px-4 border-l-2 ${hasCal ? 'bg-indigo-950/20 border-indigo-500/70' : 'bg-gray-900/40 border-transparent'}`}>
                             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-2">
 
                               {/* Stage timeline */}
