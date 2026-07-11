@@ -41,6 +41,9 @@ const TOOLTIP_STYLE = {
   contentStyle: { background: '#111827', border: '1px solid #374151', borderRadius: 8 },
 }
 
+type SortKey = 'id' | 'sessionCount' | 'total' | 'avgMeshes' | 'confirmsPerSession' | 'skipVerifyPerSession' | 'topMethod' | 'lowMeshPct' | 'latestAt'
+type SortDir = 'asc' | 'desc'
+
 export default function CalibrationQuality() {
   const [events, setEvents] = useState<CalibrationEvent[]>([])
   const [recalByDevice, setRecalByDevice] = useState<Record<string, number>>({})
@@ -50,6 +53,8 @@ export default function CalibrationQuality() {
   const [end, setEnd] = useState(new Date())
   const [deviceFilter, setDeviceFilter] = useState('')
   const [methodFilter, setMethodFilter] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('avgMeshes')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
 
   useEffect(() => {
     async function load() {
@@ -194,10 +199,17 @@ export default function CalibrationQuality() {
         : null,
     }
   }).sort((a, b) => {
-    // No calibration data → bottom; otherwise sort by avgMeshes ascending (worst first)
+    // Devices without calibration data always sink to the bottom
     if (!a.hasCalibrationData && b.hasCalibrationData) return 1
     if (a.hasCalibrationData && !b.hasCalibrationData) return -1
-    return (a.avgMeshes ?? 999) - (b.avgMeshes ?? 999)
+
+    const dir = sortDir === 'asc' ? 1 : -1
+    const av = a[sortKey]
+    const bv = b[sortKey]
+    if (av === null || av === undefined) return 1
+    if (bv === null || bv === undefined) return -1
+    if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir
+    return ((av as number) - (bv as number)) * dir
   })
 
   // ── Correlation scatter data (only devices with both calibration + session data) ──
@@ -439,21 +451,45 @@ export default function CalibrationQuality() {
               <div className="card overflow-x-auto">
                 <h2 className="text-sm font-semibold text-gray-400 mb-1">Device Quality Summary</h2>
                 <p className="text-xs text-gray-600 mb-4">
-                  All devices that ran sessions in this window. Sorted by avg scan meshes ascending — devices without
-                  calibration data shown at the bottom.
+                  All devices that ran sessions in this window. Click any column header to sort. Devices without
+                  calibration data are always shown at the bottom.
                 </p>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-gray-500 border-b border-gray-800">
-                      <th className="text-left pb-2 pr-4">Device</th>
-                      <th className="text-right pb-2 pr-4">Sessions</th>
-                      <th className="text-right pb-2 pr-4">Confirms</th>
-                      <th className="text-right pb-2 pr-4">Avg Meshes</th>
-                      <th className="text-right pb-2 pr-4">Confirms / Session</th>
-                      <th className="text-right pb-2 pr-4">Skip Verify / Session</th>
-                      <th className="text-left pb-2 pr-4">Top Method</th>
-                      <th className="text-right pb-2 pr-4">Low-Mesh %</th>
-                      <th className="text-left pb-2">Last Calibration</th>
+                      {(
+                        [
+                          { key: 'id', label: 'Device', align: 'left' },
+                          { key: 'sessionCount', label: 'Sessions', align: 'right' },
+                          { key: 'total', label: 'Confirms', align: 'right' },
+                          { key: 'avgMeshes', label: 'Avg Meshes', align: 'right' },
+                          { key: 'confirmsPerSession', label: 'Confirms / Session', align: 'right' },
+                          { key: 'skipVerifyPerSession', label: 'Skip Verify / Session', align: 'right' },
+                          { key: 'topMethod', label: 'Top Method', align: 'left' },
+                          { key: 'lowMeshPct', label: 'Low-Mesh %', align: 'right' },
+                          { key: 'latestAt', label: 'Last Calibration', align: 'left' },
+                        ] as { key: SortKey; label: string; align: 'left' | 'right' }[]
+                      ).map(({ key, label, align }, i, arr) => {
+                        const active = sortKey === key
+                        const isLast = i === arr.length - 1
+                        return (
+                          <th
+                            key={key}
+                            className={`pb-2 ${isLast ? '' : 'pr-4'} text-${align} select-none cursor-pointer hover:text-gray-300 whitespace-nowrap`}
+                            onClick={() => {
+                              if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+                              else { setSortKey(key); setSortDir('asc') }
+                            }}
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              {label}
+                              <span className={active ? 'text-indigo-400' : 'text-gray-700'}>
+                                {active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                              </span>
+                            </span>
+                          </th>
+                        )
+                      })}
                     </tr>
                   </thead>
                   <tbody>
