@@ -11,6 +11,7 @@ import SessionDurations from './pages/SessionDurations'
 import WrongLocation from './pages/WrongLocation'
 import Recalibration from './pages/Recalibration'
 import CalibrationQuality from './pages/CalibrationQuality'
+import DeviceStartup from './pages/DeviceStartup'
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/recalibration" element={<Recalibration />} />
           <Route path="/calibration-quality" element={<CalibrationQuality />} />
           <Route path="/spatial" element={<SpatialView />} />
+          <Route path="/device-startup" element={<DeviceStartup />} />
         </Routes>
       </Layout>
     </BrowserRouter>
