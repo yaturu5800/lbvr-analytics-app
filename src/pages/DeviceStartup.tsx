@@ -1,12 +1,18 @@
-import { useEffect, useState } from 'react'
-import { format, startOfDay, endOfDay } from 'date-fns'
+import { useEffect, useMemo, useState } from 'react'
+import { eachDayOfInterval, endOfDay, format, startOfDay, subDays } from 'date-fns'
 import { Link } from 'react-router-dom'
+import {
+  Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
+  ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts'
 import { supabase } from '../lib/supabase'
+import { msToDay } from '../lib/utils'
 import type { DeviceHealthSnapshot, ExperienceSession } from '../types'
 import EmptyState from '../components/EmptyState'
 
 type SortKey = 'device' | 'firstOnline' | 'firstSession' | 'gap' | 'battery' | 'wifi' | 'sessions'
 type SortDir = 'asc' | 'desc'
+type ReadyPeriod = 'week' | 'month' | 'all'
 
 interface DeviceRow {
   device: string
@@ -18,6 +24,15 @@ interface DeviceRow {
   gap: number | null        // ms between firstOnline and firstSession
   sessions: number
 }
+
+interface ReadyDayRow {
+  day: string
+  ready10: number
+  ready11: number
+  ready18: number
+}
+
+const CHART_TOOLTIP = { background: '#111827', border: '1px solid #374151', borderRadius: 8 }
 
 function fmt(ms: number | null): string {
   if (ms === null) return '—'
@@ -47,12 +62,28 @@ function battColor(v: number | null): string {
   return 'text-red-400'
 }
 
+/** Local-time minutes since midnight for an epoch ms timestamp. */
+function minutesOfDay(ms: number): number {
+  const d = new Date(ms)
+  return d.getHours() * 60 + d.getMinutes()
+}
+
+function periodLabel(period: ReadyPeriod): string {
+  if (period === 'week') return 'Past week'
+  if (period === 'month') return 'Past month'
+  return 'All time'
+}
+
 export default function DeviceStartup() {
   const [date, setDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'))
   const [rows, setRows] = useState<DeviceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [sortKey, setSortKey] = useState<SortKey>('firstOnline')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  const [readyPeriod, setReadyPeriod] = useState<ReadyPeriod>('week')
+  const [readySeries, setReadySeries] = useState<ReadyDayRow[]>([])
+  const [readyLoading, setReadyLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -124,6 +155,94 @@ export default function DeviceStartup() {
     load()
   }, [date])
 
+  // Historical: devices ready (first online) by 10:00 / 11:00 / 18:00 per day
+  useEffect(() => {
+    async function loadReady() {
+      setReadyLoading(true)
+
+      const end = endOfDay(new Date())
+      const start =
+        readyPeriod === 'week' ? startOfDay(subDays(new Date(), 6))
+          : readyPeriod === 'month' ? startOfDay(subDays(new Date(), 29))
+            : null
+
+      let query = supabase
+        .from('device_health_snapshots')
+        .select('device_id, captured_at')
+        .eq('online', 1)
+        .lte('captured_at', end.getTime())
+        .order('captured_at', { ascending: true })
+        .limit(readyPeriod === 'all' ? 100000 : 50000)
+
+      if (start) query = query.gte('captured_at', start.getTime())
+
+      const { data: snapData } = await query
+
+      const firstByDayDevice: Record<string, Record<string, number>> = {}
+      for (const s of (snapData ?? []) as Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at'>[]) {
+        if (!s.device_id) continue
+        const day = msToDay(s.captured_at)
+        if (!firstByDayDevice[day]) firstByDayDevice[day] = {}
+        if (firstByDayDevice[day][s.device_id] === undefined) {
+          firstByDayDevice[day][s.device_id] = s.captured_at
+        }
+      }
+
+      const days =
+        start
+          ? eachDayOfInterval({ start, end }).map((d) => format(d, 'yyyy-MM-dd'))
+          : Object.keys(firstByDayDevice).sort()
+
+      const series: ReadyDayRow[] = days.map((day) => {
+        const firsts = Object.values(firstByDayDevice[day] ?? {})
+        const countBy = (hour: number) =>
+          firsts.filter((ms) => minutesOfDay(ms) <= hour * 60).length
+        return {
+          day,
+          ready10: countBy(10),
+          ready11: countBy(11),
+          ready18: countBy(18),
+        }
+      })
+
+      setReadySeries(series)
+      setReadyLoading(false)
+    }
+    loadReady()
+  }, [readyPeriod])
+
+  /** Cumulative devices woken up by each hour from 09:00 onward (selected day). */
+  const cumulativeWakeSeries = useMemo(() => {
+    const firstTimes = rows
+      .map((r) => r.firstOnline)
+      .filter((ms): ms is number => ms !== null)
+      .sort((a, b) => a - b)
+
+    if (!firstTimes.length) return []
+
+    const day = startOfDay(new Date(date))
+    const startHour = 9
+    const now = new Date()
+    const isToday = format(now, 'yyyy-MM-dd') === date
+    const lastHour = isToday
+      ? Math.max(startHour, now.getHours())
+      : Math.max(startHour, ...firstTimes.map((ms) => new Date(ms).getHours()), 18)
+
+    const points: { time: string; hour: number; woken: number }[] = []
+    for (let hour = startHour; hour <= lastHour; hour++) {
+      const cutoff = new Date(day)
+      cutoff.setHours(hour, 0, 0, 0)
+      const cutoffMs = cutoff.getTime()
+      const woken = firstTimes.filter((ms) => ms <= cutoffMs).length
+      points.push({
+        time: format(cutoff, 'HH:mm'),
+        hour,
+        woken,
+      })
+    }
+    return points
+  }, [rows, date])
+
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
@@ -155,6 +274,12 @@ export default function DeviceStartup() {
     { key: 'firstSession', label: 'First Session', align: 'right' },
     { key: 'gap', label: 'Online → Session', align: 'right' },
     { key: 'sessions', label: 'Sessions Today', align: 'right' },
+  ]
+
+  const periodButtons: { key: ReadyPeriod; label: string }[] = [
+    { key: 'week', label: 'Past week' },
+    { key: 'month', label: 'Past month' },
+    { key: 'all', label: 'All time' },
   ]
 
   return (
@@ -203,74 +328,151 @@ export default function DeviceStartup() {
             </div>
           </div>
 
-          {/* Table */}
-          <div className="card overflow-x-auto">
-            <h2 className="text-sm font-semibold text-gray-400 mb-1">Per-Device Startup Times</h2>
+          {/* Cumulative wake-up during the selected day */}
+          <div className="card">
+            <h2 className="text-sm font-semibold text-gray-400 mb-1">Devices Woken Up Through the Day</h2>
             <p className="text-xs text-gray-600 mb-4">
-              First health-snapshot with <code className="text-gray-500">online=1</code> and first session start for {date}. Click headers to sort.
+              Cumulative count of devices that have been online by each hour on {date} (first <code className="text-gray-500">online=1</code> snapshot). Only increases.
             </p>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-gray-500 border-b border-gray-800">
-                  {cols.map(({ key, label, align }, i, arr) => {
-                    const active = sortKey === key
-                    const isLast = i === arr.length - 1
-                    return (
-                      <th
-                        key={key}
-                        className={`pb-2 ${isLast ? '' : 'pr-4'} text-${align} select-none cursor-pointer hover:text-gray-300 whitespace-nowrap`}
-                        onClick={() => handleSort(key)}
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          {label}
-                          <span className={active ? 'text-indigo-400' : 'text-gray-700'}>
-                            {active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-                          </span>
-                        </span>
-                      </th>
-                    )
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((r) => (
-                  <tr key={r.device} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                    <td className="py-2 pr-4">
-                      <Link
-                        to={`/devices/${r.device}`}
-                        className="font-mono text-indigo-400 hover:text-indigo-300 text-xs"
-                      >
-                        {r.device}
-                      </Link>
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs text-gray-200">
-                      {r.firstOnline !== null ? (
-                        <span className="text-green-400">{fmt(r.firstOnline)}</span>
-                      ) : (
-                        <span className="text-gray-600">No snapshot</span>
-                      )}
-                    </td>
-                    <td className={`py-2 pr-4 text-right font-mono text-xs ${battColor(r.battery)}`}>
-                      {r.battery !== null ? `${r.battery}%` : '—'}
-                    </td>
-                    <td className={`py-2 pr-4 text-right font-mono text-xs ${wifiColor(r.wifi)}`}>
-                      {r.wifi !== null ? `${r.wifi}` : '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs text-gray-300">
-                      {r.firstSession !== null ? fmt(r.firstSession) : <span className="text-gray-600">No session</span>}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs text-yellow-400">
-                      {fmtGap(r.gap)}
-                    </td>
-                    <td className="py-2 text-right text-xs text-gray-300">
-                      {r.sessions > 0 ? r.sessions : <span className="text-gray-600">0</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {cumulativeWakeSeries.length === 0 ? (
+              <p className="text-sm text-gray-500">No online devices for this date.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={cumulativeWakeSeries}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                  <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP}
+                    formatter={(value) => [value ?? 0, 'Devices woken']}
+                    labelFormatter={(label) => `By ${label}`}
+                  />
+                  <Bar dataKey="woken" name="Devices woken" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </>
+      )}
+
+      {/* Ready-at checkpoints — own period filter, always visible */}
+      <div className="card">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <h2 className="text-sm font-semibold text-gray-400">Devices Ready by Checkpoint</h2>
+          <div className="flex items-center gap-1">
+            {periodButtons.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setReadyPeriod(p.key)}
+                className={`text-xs px-2 py-1 rounded ${
+                  readyPeriod === p.key
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-800 hover:bg-gray-700 text-gray-300'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-gray-600 mb-4">
+          Daily count of devices whose first online snapshot was at or before 10:00, 11:00, and 18:00 — {periodLabel(readyPeriod).toLowerCase()}.
+        </p>
+        {readyLoading ? (
+          <p className="text-gray-500 text-sm">Loading…</p>
+        ) : readySeries.length === 0 ? (
+          <p className="text-sm text-gray-500">No snapshot data for this period.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={readySeries}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis
+                dataKey="day"
+                tick={{ fontSize: 10, fill: '#9ca3af' }}
+                tickFormatter={(d) => format(new Date(d + 'T00:00:00'), 'MMM d')}
+                interval="preserveStartEnd"
+              />
+              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} allowDecimals={false} />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP}
+                labelFormatter={(d) => format(new Date(String(d) + 'T00:00:00'), 'EEE, MMM d yyyy')}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line type="monotone" dataKey="ready10" name="Ready by 10:00" stroke="#6366f1" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="ready11" name="Ready by 11:00" stroke="#14b8a6" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="ready18" name="Ready by 18:00" stroke="#22d3ee" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {!loading && rows.length > 0 && (
+        <div className="card overflow-x-auto">
+          <h2 className="text-sm font-semibold text-gray-400 mb-1">Per-Device Startup Times</h2>
+          <p className="text-xs text-gray-600 mb-4">
+            First health-snapshot with <code className="text-gray-500">online=1</code> and first session start for {date}. Click headers to sort.
+          </p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500 border-b border-gray-800">
+                {cols.map(({ key, label, align }, i, arr) => {
+                  const active = sortKey === key
+                  const isLast = i === arr.length - 1
+                  return (
+                    <th
+                      key={key}
+                      className={`pb-2 ${isLast ? '' : 'pr-4'} text-${align} select-none cursor-pointer hover:text-gray-300 whitespace-nowrap`}
+                      onClick={() => handleSort(key)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {label}
+                        <span className={active ? 'text-indigo-400' : 'text-gray-700'}>
+                          {active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                        </span>
+                      </span>
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.device} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                  <td className="py-2 pr-4">
+                    <Link
+                      to={`/devices/${r.device}`}
+                      className="font-mono text-indigo-400 hover:text-indigo-300 text-xs"
+                    >
+                      {r.device}
+                    </Link>
+                  </td>
+                  <td className="py-2 pr-4 text-right font-mono text-xs text-gray-200">
+                    {r.firstOnline !== null ? (
+                      <span className="text-green-400">{fmt(r.firstOnline)}</span>
+                    ) : (
+                      <span className="text-gray-600">No snapshot</span>
+                    )}
+                  </td>
+                  <td className={`py-2 pr-4 text-right font-mono text-xs ${battColor(r.battery)}`}>
+                    {r.battery !== null ? `${r.battery}%` : '—'}
+                  </td>
+                  <td className={`py-2 pr-4 text-right font-mono text-xs ${wifiColor(r.wifi)}`}>
+                    {r.wifi !== null ? `${r.wifi}` : '—'}
+                  </td>
+                  <td className="py-2 pr-4 text-right font-mono text-xs text-gray-300">
+                    {r.firstSession !== null ? fmt(r.firstSession) : <span className="text-gray-600">No session</span>}
+                  </td>
+                  <td className="py-2 pr-4 text-right font-mono text-xs text-yellow-400">
+                    {fmtGap(r.gap)}
+                  </td>
+                  <td className="py-2 text-right text-xs text-gray-300">
+                    {r.sessions > 0 ? r.sessions : <span className="text-gray-600">0</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
