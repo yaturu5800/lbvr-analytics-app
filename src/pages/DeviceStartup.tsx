@@ -32,7 +32,25 @@ interface ReadyDayRow {
   ready18: number
 }
 
+const PAGE_SIZE = 1000
 const CHART_TOOLTIP = { background: '#111827', border: '1px solid #374151', borderRadius: 8 }
+
+/** Page through all matching rows (Supabase/PostgREST caps each response). */
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const all: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    if (!data?.length) break
+    all.push(...data)
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return all
+}
 
 function fmt(ms: number | null): string {
   if (ms === null) return '—'
@@ -86,77 +104,95 @@ export default function DeviceStartup() {
   const [readyLoading, setReadyLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
       setLoading(true)
 
       const dayStart = startOfDay(new Date(date)).getTime()
       const dayEnd = endOfDay(new Date(date)).getTime()
 
-      const [{ data: snapData }, { data: sessionData }] = await Promise.all([
-        supabase
-          .from('device_health_snapshots')
-          .select('device_id, captured_at, online, battery_level, wifi_strength, app_version')
-          .gte('captured_at', dayStart)
-          .lte('captured_at', dayEnd)
-          .eq('online', 1)
-          .order('captured_at', { ascending: true })
-          .limit(20000),
-        supabase
-          .from('experience_sessions')
-          .select('device_id, started_at')
-          .gte('started_at', dayStart)
-          .lte('started_at', dayEnd)
-          .order('started_at', { ascending: true })
-          .limit(10000),
-      ])
+      try {
+        type SnapRow = Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at' | 'battery_level' | 'wifi_strength' | 'app_version'>
+        type SessRow = Pick<ExperienceSession, 'device_id' | 'started_at'>
 
-      // First online snapshot per device
-      const firstSnap: Record<string, DeviceHealthSnapshot> = {}
-      for (const s of (snapData ?? []) as DeviceHealthSnapshot[]) {
-        if (!firstSnap[s.device_id]) firstSnap[s.device_id] = s
-      }
+        const [snapData, sessionData] = await Promise.all([
+          fetchAllPages<SnapRow>((from, to) =>
+            supabase
+              .from('device_health_snapshots')
+              .select('device_id, captured_at, battery_level, wifi_strength, app_version')
+              .gte('captured_at', dayStart)
+              .lte('captured_at', dayEnd)
+              .eq('online', 1)
+              .order('captured_at', { ascending: true })
+              .range(from, to),
+          ),
+          fetchAllPages<SessRow>((from, to) =>
+            supabase
+              .from('experience_sessions')
+              .select('device_id, started_at')
+              .gte('started_at', dayStart)
+              .lte('started_at', dayEnd)
+              .order('started_at', { ascending: true })
+              .range(from, to),
+          ),
+        ])
+        if (cancelled) return
 
-      // First session + session count per device
-      const firstSess: Record<string, number> = {}
-      const sessCount: Record<string, number> = {}
-      for (const s of (sessionData ?? []) as Pick<ExperienceSession, 'device_id' | 'started_at'>[]) {
-        if (s.device_id) {
-          if (!firstSess[s.device_id]) firstSess[s.device_id] = s.started_at
-          sessCount[s.device_id] = (sessCount[s.device_id] ?? 0) + 1
+        // First online snapshot per device
+        const firstSnap: Record<string, SnapRow> = {}
+        for (const s of snapData) {
+          if (!firstSnap[s.device_id]) firstSnap[s.device_id] = s
         }
-      }
 
-      // Union of all device IDs seen today
-      const allDevices = new Set([
-        ...Object.keys(firstSnap),
-        ...Object.keys(firstSess),
-      ])
-
-      const result: DeviceRow[] = [...allDevices].map((id) => {
-        const snap = firstSnap[id]
-        const onlineAt = snap?.captured_at ?? null
-        const sessionAt = firstSess[id] ?? null
-        const gap = onlineAt !== null && sessionAt !== null ? sessionAt - onlineAt : null
-        return {
-          device: id,
-          firstOnline: onlineAt,
-          battery: snap?.battery_level ?? null,
-          wifi: snap?.wifi_strength ?? null,
-          appVersion: snap?.app_version ?? null,
-          firstSession: sessionAt,
-          gap,
-          sessions: sessCount[id] ?? 0,
+        // First session + session count per device
+        const firstSess: Record<string, number> = {}
+        const sessCount: Record<string, number> = {}
+        for (const s of sessionData) {
+          if (s.device_id) {
+            if (!firstSess[s.device_id]) firstSess[s.device_id] = s.started_at
+            sessCount[s.device_id] = (sessCount[s.device_id] ?? 0) + 1
+          }
         }
-      })
 
-      setRows(result)
-      setLoading(false)
+        const allDevices = new Set([
+          ...Object.keys(firstSnap),
+          ...Object.keys(firstSess),
+        ])
+
+        const result: DeviceRow[] = [...allDevices].map((id) => {
+          const snap = firstSnap[id]
+          const onlineAt = snap?.captured_at ?? null
+          const sessionAt = firstSess[id] ?? null
+          const gap = onlineAt !== null && sessionAt !== null ? sessionAt - onlineAt : null
+          return {
+            device: id,
+            firstOnline: onlineAt,
+            battery: snap?.battery_level ?? null,
+            wifi: snap?.wifi_strength ?? null,
+            appVersion: snap?.app_version ?? null,
+            firstSession: sessionAt,
+            gap,
+            sessions: sessCount[id] ?? 0,
+          }
+        })
+
+        setRows(result)
+      } catch (e) {
+        if (!cancelled) {
+          console.error(e)
+          setRows([])
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     load()
+    return () => { cancelled = true }
   }, [date])
 
   // Historical: devices ready (first online) by 10:00 / 11:00 / 18:00 per day
   useEffect(() => {
+    let cancelled = false
     async function loadReady() {
       setReadyLoading(true)
 
@@ -166,49 +202,60 @@ export default function DeviceStartup() {
           : readyPeriod === 'month' ? startOfDay(subDays(new Date(), 29))
             : null
 
-      let query = supabase
-        .from('device_health_snapshots')
-        .select('device_id, captured_at')
-        .eq('online', 1)
-        .lte('captured_at', end.getTime())
-        .order('captured_at', { ascending: true })
-        .limit(readyPeriod === 'all' ? 100000 : 50000)
+      try {
+        type SnapLean = Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at'>
+        const snapData = await fetchAllPages<SnapLean>((from, to) => {
+          let q = supabase
+            .from('device_health_snapshots')
+            .select('device_id, captured_at')
+            .eq('online', 1)
+            .lte('captured_at', end.getTime())
+          if (start) q = q.gte('captured_at', start.getTime())
+          return q
+            .order('captured_at', { ascending: true })
+            .range(from, to)
+        })
+        if (cancelled) return
 
-      if (start) query = query.gte('captured_at', start.getTime())
-
-      const { data: snapData } = await query
-
-      const firstByDayDevice: Record<string, Record<string, number>> = {}
-      for (const s of (snapData ?? []) as Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at'>[]) {
-        if (!s.device_id) continue
-        const day = msToDay(s.captured_at)
-        if (!firstByDayDevice[day]) firstByDayDevice[day] = {}
-        if (firstByDayDevice[day][s.device_id] === undefined) {
-          firstByDayDevice[day][s.device_id] = s.captured_at
+        const firstByDayDevice: Record<string, Record<string, number>> = {}
+        for (const s of snapData) {
+          if (!s.device_id) continue
+          const day = msToDay(s.captured_at)
+          if (!firstByDayDevice[day]) firstByDayDevice[day] = {}
+          if (firstByDayDevice[day][s.device_id] === undefined) {
+            firstByDayDevice[day][s.device_id] = s.captured_at
+          }
         }
+
+        const days =
+          start
+            ? eachDayOfInterval({ start, end }).map((d) => format(d, 'yyyy-MM-dd'))
+            : Object.keys(firstByDayDevice).sort()
+
+        const series: ReadyDayRow[] = days.map((day) => {
+          const firsts = Object.values(firstByDayDevice[day] ?? {})
+          const countBy = (hour: number) =>
+            firsts.filter((ms) => minutesOfDay(ms) <= hour * 60).length
+          return {
+            day,
+            ready10: countBy(10),
+            ready11: countBy(11),
+            ready18: countBy(18),
+          }
+        })
+
+        setReadySeries(series)
+      } catch (e) {
+        if (!cancelled) {
+          console.error(e)
+          setReadySeries([])
+        }
+      } finally {
+        if (!cancelled) setReadyLoading(false)
       }
-
-      const days =
-        start
-          ? eachDayOfInterval({ start, end }).map((d) => format(d, 'yyyy-MM-dd'))
-          : Object.keys(firstByDayDevice).sort()
-
-      const series: ReadyDayRow[] = days.map((day) => {
-        const firsts = Object.values(firstByDayDevice[day] ?? {})
-        const countBy = (hour: number) =>
-          firsts.filter((ms) => minutesOfDay(ms) <= hour * 60).length
-        return {
-          day,
-          ready10: countBy(10),
-          ready11: countBy(11),
-          ready18: countBy(18),
-        }
-      })
-
-      setReadySeries(series)
-      setReadyLoading(false)
     }
     loadReady()
+    return () => { cancelled = true }
   }, [readyPeriod])
 
   /** Cumulative devices woken up by each hour from 09:00 onward (selected day). */
