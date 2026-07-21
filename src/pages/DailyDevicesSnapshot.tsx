@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { eachDayOfInterval, format, subDays } from 'date-fns'
+import { eachDayOfInterval, format, parseISO, subDays } from 'date-fns'
 import { Link } from 'react-router-dom'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
@@ -29,6 +29,12 @@ interface UnusedRow {
 
 function fmtTime(ms: number): string {
   return format(new Date(ms), 'HH:mm:ss')
+}
+
+/** Chart / UI label: 21-Jul (Mon) */
+function fmtChartDay(day: string): string {
+  const d = parseISO(day)
+  return `${format(d, 'dd-MMM')} (${format(d, 'EEE').toLowerCase()})`
 }
 
 function wifiColor(v: number | null): string {
@@ -223,7 +229,7 @@ export default function DailyDevicesSnapshot() {
             <p className="text-xs text-gray-600 mb-4">
               Click a bar to inspect unused devices for that day.
               {effectiveSelectedDay ? (
-                <> Selected: <span className="text-gray-400">{effectiveSelectedDay}</span></>
+                <> Selected: <span className="text-gray-400">{fmtChartDay(effectiveSelectedDay)}</span></>
               ) : null}
             </p>
             <ResponsiveContainer width="100%" height={260}>
@@ -234,11 +240,16 @@ export default function DailyDevicesSnapshot() {
                   if (typeof day === 'string') setSelectedDay(day)
                 }}
               >
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  tickFormatter={fmtChartDay}
+                />
                 <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }}
                   cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }}
+                  labelFormatter={(label) => fmtChartDay(String(label))}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="online" name="Online" fill="#6366f1" radius={[3, 3, 0, 0]} cursor="pointer" />
@@ -252,11 +263,16 @@ export default function DailyDevicesSnapshot() {
             <p className="text-xs text-gray-600 mb-4">Active devices ÷ online devices. Days with no online devices show 0%.</p>
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={series}>
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  tickFormatter={fmtChartDay}
+                />
                 <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} unit="%" />
                 <Tooltip
                   contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }}
                   formatter={(value) => [`${value}%`, 'Utilization']}
+                  labelFormatter={(label) => fmtChartDay(String(label))}
                 />
                 <Line
                   type="monotone"
@@ -274,7 +290,7 @@ export default function DailyDevicesSnapshot() {
             <h2 className="text-sm font-semibold text-gray-400 mb-1">
               Online but Unused
               {effectiveSelectedDay ? (
-                <span className="text-gray-500 font-normal"> — {effectiveSelectedDay}</span>
+                <span className="text-gray-500 font-normal"> — {fmtChartDay(effectiveSelectedDay)}</span>
               ) : null}
             </h2>
             <p className="text-xs text-gray-600 mb-4">
