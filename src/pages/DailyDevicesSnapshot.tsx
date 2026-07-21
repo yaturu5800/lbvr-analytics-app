@@ -123,6 +123,7 @@ export default function DailyDevicesSnapshot() {
             supabase
               .from('experience_sessions')
               .select('device_id, started_at')
+              .eq('was_completed', true)
               .gte('started_at', start.getTime())
               .lte('started_at', end.getTime())
               .order('started_at', { ascending: true })
@@ -284,13 +285,13 @@ export default function DailyDevicesSnapshot() {
               label="Avg Active / Day"
               value={fmtAvg(avgActive)}
               color="text-teal-400"
-              sub="devices with ≥1 session"
+              sub="devices with ≥1 completed experience"
             />
             <MetricCard
               label="Avg Unused / Day"
               value={fmtAvg(avgUnused)}
               color="text-yellow-400"
-              sub="online, zero sessions"
+              sub="online, no completed experience"
             />
             <MetricCard
               label="Avg Utilization"
@@ -303,7 +304,7 @@ export default function DailyDevicesSnapshot() {
           <div className="card">
             <h2 className="text-sm font-semibold text-gray-400 mb-1">Online vs Active Devices per Day</h2>
             <p className="text-xs text-gray-600 mb-4">
-              Click a bar to inspect unused devices for that day.
+              Active = ≥1 completed experience that day. Click a bar to inspect unused devices.
               {effectiveSelectedDay ? (
                 <> Selected: <span className="text-gray-400">{fmtChartDay(effectiveSelectedDay)}</span></>
               ) : null}
@@ -329,14 +330,16 @@ export default function DailyDevicesSnapshot() {
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="online" name="Online" fill="#6366f1" radius={[3, 3, 0, 0]} cursor="pointer" />
-                <Bar dataKey="active" name="Active" fill="#14b8a6" radius={[3, 3, 0, 0]} cursor="pointer" />
+                <Bar dataKey="active" name="Active (completed)" fill="#14b8a6" radius={[3, 3, 0, 0]} cursor="pointer" />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           <div className="card">
             <h2 className="text-sm font-semibold text-gray-400 mb-1">Utilization % per Day</h2>
-            <p className="text-xs text-gray-600 mb-4">Active devices ÷ online devices. Days with no online devices show 0%.</p>
+            <p className="text-xs text-gray-600 mb-4">
+              Devices with ≥1 completed experience ÷ online devices. Days with no online devices show 0%.
+            </p>
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={series}>
                 <XAxis
@@ -370,7 +373,7 @@ export default function DailyDevicesSnapshot() {
               ) : null}
             </h2>
             <p className="text-xs text-gray-600 mb-4">
-              Devices with an <code className="text-gray-500">online=1</code> health snapshot and zero sessions that day.
+              Devices with an <code className="text-gray-500">online=1</code> health snapshot and no completed experience that day.
               {unusedRows.length > 0 ? ` ${unusedRows.length} device${unusedRows.length === 1 ? '' : 's'}.` : ''}
             </p>
             {unusedLoading ? (
@@ -378,7 +381,7 @@ export default function DailyDevicesSnapshot() {
             ) : unusedRows.length === 0 ? (
               <p className="text-sm text-gray-500">
                 {effectiveSelectedDay && (onlineByDay[effectiveSelectedDay]?.size ?? 0) > 0
-                  ? 'All online devices ran at least one session this day.'
+                  ? 'All online devices completed at least one experience this day.'
                   : 'No online devices for this day.'}
               </p>
             ) : (
