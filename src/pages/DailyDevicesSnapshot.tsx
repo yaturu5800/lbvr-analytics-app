@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { eachDayOfInterval, format, parseISO, subDays } from 'date-fns'
+import { eachDayOfInterval, endOfDay, format, parseISO, startOfDay, subDays } from 'date-fns'
 import { Link } from 'react-router-dom'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { msToDay } from '../lib/utils'
-import type { DeviceHealthSnapshot, ExperienceSession } from '../types'
 import MetricCard from '../components/MetricCard'
 import DateRangePicker from '../components/DateRangePicker'
 import EmptyState from '../components/EmptyState'
+
+const PAGE_SIZE = 1000
 
 interface DaySeries {
   day: string
@@ -27,11 +28,21 @@ interface UnusedRow {
   appVersion: string | null
 }
 
+interface SnapLean {
+  device_id: string
+  captured_at: number
+}
+
+interface SessionLean {
+  device_id: string
+  started_at: number
+}
+
 function fmtTime(ms: number): string {
   return format(new Date(ms), 'HH:mm:ss')
 }
 
-/** Chart / UI label: 21-Jul (Mon) */
+/** Chart / UI label: 21-Jul (mon) */
 function fmtChartDay(day: string): string {
   const d = parseISO(day)
   return `${format(d, 'dd-MMM')} (${format(d, 'EEE').toLowerCase()})`
@@ -51,69 +62,97 @@ function battColor(v: number | null): string {
   return 'text-red-400'
 }
 
+/** Page through all matching rows (avoids hard limit truncation). */
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const all: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    if (!data?.length) break
+    all.push(...data)
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return all
+}
+
+function buildSetsByDay(
+  rows: { device_id: string; at: number }[],
+): Record<string, Set<string>> {
+  const sets: Record<string, Set<string>> = {}
+  for (const r of rows) {
+    if (!r.device_id) continue
+    const day = msToDay(r.at)
+    if (!sets[day]) sets[day] = new Set()
+    sets[day].add(r.device_id)
+  }
+  return sets
+}
+
 export default function DailyDevicesSnapshot() {
   const [start, setStart] = useState(subDays(new Date(), 30))
   const [end, setEnd] = useState(new Date())
   const [loading, setLoading] = useState(true)
-  const [snaps, setSnaps] = useState<Pick<DeviceHealthSnapshot, 'device_id' | 'captured_at' | 'battery_level' | 'wifi_strength' | 'app_version'>[]>([])
-  const [sessions, setSessions] = useState<Pick<ExperienceSession, 'device_id' | 'started_at'>[]>([])
+  const [onlineByDay, setOnlineByDay] = useState<Record<string, Set<string>>>({})
+  const [activeByDay, setActiveByDay] = useState<Record<string, Set<string>>>({})
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [unusedRows, setUnusedRows] = useState<UnusedRow[]>([])
+  const [unusedLoading, setUnusedLoading] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
       setLoading(true)
-      const [{ data: snapData }, { data: sessionData }] = await Promise.all([
-        supabase
-          .from('device_health_snapshots')
-          .select('device_id, captured_at, online, battery_level, wifi_strength, app_version')
-          .gte('captured_at', start.getTime())
-          .lte('captured_at', end.getTime())
-          .eq('online', 1)
-          .order('captured_at', { ascending: true })
-          .limit(50000),
-        supabase
-          .from('experience_sessions')
-          .select('device_id, started_at')
-          .gte('started_at', start.getTime())
-          .lte('started_at', end.getTime())
-          .order('started_at', { ascending: true })
-          .limit(20000),
-      ])
-      setSnaps((snapData ?? []) as typeof snaps)
-      setSessions((sessionData ?? []) as typeof sessions)
       setSelectedDay(null)
-      setLoading(false)
+      try {
+        const [snapRows, sessionRows] = await Promise.all([
+          fetchAllPages<SnapLean>((from, to) =>
+            supabase
+              .from('device_health_snapshots')
+              .select('device_id, captured_at')
+              .eq('online', 1)
+              .gte('captured_at', start.getTime())
+              .lte('captured_at', end.getTime())
+              .order('captured_at', { ascending: true })
+              .range(from, to),
+          ),
+          fetchAllPages<SessionLean>((from, to) =>
+            supabase
+              .from('experience_sessions')
+              .select('device_id, started_at')
+              .gte('started_at', start.getTime())
+              .lte('started_at', end.getTime())
+              .order('started_at', { ascending: true })
+              .range(from, to),
+          ),
+        ])
+        if (cancelled) return
+        setOnlineByDay(buildSetsByDay(snapRows.map((s) => ({ device_id: s.device_id, at: s.captured_at }))))
+        setActiveByDay(buildSetsByDay(sessionRows.map((s) => ({ device_id: s.device_id, at: s.started_at }))))
+      } catch (err) {
+        console.error('DailyDevicesSnapshot load failed', err)
+        if (!cancelled) {
+          setOnlineByDay({})
+          setActiveByDay({})
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     load()
+    return () => { cancelled = true }
   }, [start, end])
 
-  const { series, onlineByDay, firstSnapByDayDevice } = useMemo(() => {
-    const onlineSets: Record<string, Set<string>> = {}
-    const activeSets: Record<string, Set<string>> = {}
-    const firstSnap: Record<string, Record<string, typeof snaps[0]>> = {}
-
-    for (const s of snaps) {
-      if (!s.device_id) continue
-      const day = msToDay(s.captured_at)
-      if (!onlineSets[day]) onlineSets[day] = new Set()
-      onlineSets[day].add(s.device_id)
-      if (!firstSnap[day]) firstSnap[day] = {}
-      if (!firstSnap[day][s.device_id]) firstSnap[day][s.device_id] = s
-    }
-
-    for (const s of sessions) {
-      if (!s.device_id) continue
-      const day = msToDay(s.started_at)
-      if (!activeSets[day]) activeSets[day] = new Set()
-      activeSets[day].add(s.device_id)
-    }
-
+  const series: DaySeries[] = useMemo(() => {
     const days = eachDayOfInterval({ start, end }).map((d) => format(d, 'yyyy-MM-dd'))
-    const seriesData: DaySeries[] = days.map((day) => {
-      const online = onlineSets[day]?.size ?? 0
-      const active = activeSets[day]?.size ?? 0
+    return days.map((day) => {
+      const online = onlineByDay[day]?.size ?? 0
+      const active = activeByDay[day]?.size ?? 0
       const unused = online
-        ? [...(onlineSets[day] ?? [])].filter((id) => !activeSets[day]?.has(id)).length
+        ? [...(onlineByDay[day] ?? [])].filter((id) => !activeByDay[day]?.has(id)).length
         : 0
       return {
         day,
@@ -123,24 +162,7 @@ export default function DailyDevicesSnapshot() {
         utilizationPct: online ? +((active / online) * 100).toFixed(1) : 0,
       }
     })
-
-    return {
-      series: seriesData,
-      onlineByDay: onlineSets,
-      firstSnapByDayDevice: firstSnap,
-    }
-  }, [snaps, sessions, start, end])
-
-  const activeByDay = useMemo(() => {
-    const sets: Record<string, Set<string>> = {}
-    for (const s of sessions) {
-      if (!s.device_id) continue
-      const day = msToDay(s.started_at)
-      if (!sets[day]) sets[day] = new Set()
-      sets[day].add(s.device_id)
-    }
-    return sets
-  }, [sessions])
+  }, [onlineByDay, activeByDay, start, end])
 
   const effectiveSelectedDay = useMemo(() => {
     if (selectedDay && series.some((d) => d.day === selectedDay)) return selectedDay
@@ -148,26 +170,79 @@ export default function DailyDevicesSnapshot() {
     return withData?.day ?? series[series.length - 1]?.day ?? null
   }, [selectedDay, series])
 
-  const unusedRows: UnusedRow[] = useMemo(() => {
-    if (!effectiveSelectedDay) return []
-    const online = onlineByDay[effectiveSelectedDay]
-    if (!online) return []
-    const active = activeByDay[effectiveSelectedDay] ?? new Set()
-    const firsts = firstSnapByDayDevice[effectiveSelectedDay] ?? {}
-    return [...online]
-      .filter((id) => !active.has(id))
-      .map((id) => {
-        const snap = firsts[id]
-        return {
-          device: id,
-          firstOnline: snap?.captured_at ?? 0,
-          battery: snap?.battery_level ?? null,
-          wifi: snap?.wifi_strength ?? null,
-          appVersion: snap?.app_version ?? null,
+  // Detail rows for unused devices on the selected day (battery / wifi / version)
+  useEffect(() => {
+    let cancelled = false
+    async function loadUnused() {
+      if (!effectiveSelectedDay) {
+        setUnusedRows([])
+        return
+      }
+      const online = onlineByDay[effectiveSelectedDay]
+      const active = activeByDay[effectiveSelectedDay] ?? new Set()
+      if (!online?.size) {
+        setUnusedRows([])
+        return
+      }
+      const unusedIds = [...online].filter((id) => !active.has(id))
+      const unusedSet = new Set(unusedIds)
+      if (!unusedIds.length) {
+        setUnusedRows([])
+        return
+      }
+
+      setUnusedLoading(true)
+      try {
+        const dayStart = startOfDay(parseISO(effectiveSelectedDay)).getTime()
+        const dayEnd = endOfDay(parseISO(effectiveSelectedDay)).getTime()
+        const snapRows = await fetchAllPages<{
+          device_id: string
+          captured_at: number
+          battery_level: number | null
+          wifi_strength: number | null
+          app_version: string | null
+        }>((from, to) =>
+          supabase
+            .from('device_health_snapshots')
+            .select('device_id, captured_at, battery_level, wifi_strength, app_version')
+            .eq('online', 1)
+            .gte('captured_at', dayStart)
+            .lte('captured_at', dayEnd)
+            .order('captured_at', { ascending: true })
+            .range(from, to),
+        )
+        if (cancelled) return
+
+        const firstByDevice: Record<string, (typeof snapRows)[0]> = {}
+        for (const s of snapRows) {
+          if (!s.device_id || !unusedSet.has(s.device_id)) continue
+          if (!firstByDevice[s.device_id]) firstByDevice[s.device_id] = s
         }
-      })
-      .sort((a, b) => a.firstOnline - b.firstOnline)
-  }, [effectiveSelectedDay, onlineByDay, activeByDay, firstSnapByDayDevice])
+
+        const rows: UnusedRow[] = unusedIds
+          .map((id) => {
+            const snap = firstByDevice[id]
+            return {
+              device: id,
+              firstOnline: snap?.captured_at ?? 0,
+              battery: snap?.battery_level ?? null,
+              wifi: snap?.wifi_strength ?? null,
+              appVersion: snap?.app_version ?? null,
+            }
+          })
+          .sort((a, b) => a.firstOnline - b.firstOnline)
+
+        setUnusedRows(rows)
+      } catch (err) {
+        console.error('DailyDevicesSnapshot unused load failed', err)
+        if (!cancelled) setUnusedRows([])
+      } finally {
+        if (!cancelled) setUnusedLoading(false)
+      }
+    }
+    loadUnused()
+    return () => { cancelled = true }
+  }, [effectiveSelectedDay, onlineByDay, activeByDay])
 
   const daysWithOnline = series.filter((d) => d.online > 0)
   const avgOnline = daysWithOnline.length
@@ -184,6 +259,7 @@ export default function DailyDevicesSnapshot() {
     : 0
 
   const hasAnyData = series.some((d) => d.online > 0 || d.active > 0)
+  const fmtAvg = (n: number) => (daysWithOnline.length ? n.toFixed(1) : '—')
 
   return (
     <div className="space-y-6">
@@ -201,18 +277,18 @@ export default function DailyDevicesSnapshot() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
               label="Avg Online / Day"
-              value={avgOnline ? avgOnline.toFixed(1) : '—'}
+              value={fmtAvg(avgOnline)}
               sub="days with ≥1 online device"
             />
             <MetricCard
               label="Avg Active / Day"
-              value={avgActive ? avgActive.toFixed(1) : '—'}
+              value={fmtAvg(avgActive)}
               color="text-teal-400"
               sub="devices with ≥1 session"
             />
             <MetricCard
               label="Avg Unused / Day"
-              value={avgUnused ? avgUnused.toFixed(1) : '—'}
+              value={fmtAvg(avgUnused)}
               color="text-yellow-400"
               sub="online, zero sessions"
             />
@@ -280,7 +356,7 @@ export default function DailyDevicesSnapshot() {
                   name="Utilization"
                   stroke="#22d3ee"
                   strokeWidth={2}
-                  dot={false}
+                  dot={{ r: 2, fill: '#22d3ee' }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -297,7 +373,9 @@ export default function DailyDevicesSnapshot() {
               Devices with an <code className="text-gray-500">online=1</code> health snapshot and zero sessions that day.
               {unusedRows.length > 0 ? ` ${unusedRows.length} device${unusedRows.length === 1 ? '' : 's'}.` : ''}
             </p>
-            {unusedRows.length === 0 ? (
+            {unusedLoading ? (
+              <p className="text-sm text-gray-500">Loading…</p>
+            ) : unusedRows.length === 0 ? (
               <p className="text-sm text-gray-500">
                 {effectiveSelectedDay && (onlineByDay[effectiveSelectedDay]?.size ?? 0) > 0
                   ? 'All online devices ran at least one session this day.'
