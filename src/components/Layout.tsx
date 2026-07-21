@@ -16,6 +16,7 @@ const analyticsNav = [
   { to: '/recalibration', label: 'Recalibration' },
   { to: '/calibration-quality', label: 'Calibration Quality' },
   { to: '/device-startup', label: 'Device Startup' },
+  { to: '/daily-devices-snapshot', label: 'Daily Devices Snapshot' },
 ]
 
 export default function Layout({ children }: { children: React.ReactNode }) {

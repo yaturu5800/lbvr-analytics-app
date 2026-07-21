@@ -12,6 +12,7 @@ import WrongLocation from './pages/WrongLocation'
 import Recalibration from './pages/Recalibration'
 import CalibrationQuality from './pages/CalibrationQuality'
 import DeviceStartup from './pages/DeviceStartup'
+import DailyDevicesSnapshot from './pages/DailyDevicesSnapshot'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/calibration-quality" element={<CalibrationQuality />} />
           <Route path="/spatial" element={<SpatialView />} />
           <Route path="/device-startup" element={<DeviceStartup />} />
+          <Route path="/daily-devices-snapshot" element={<DailyDevicesSnapshot />} />
         </Routes>
       </Layout>
     </BrowserRouter>
